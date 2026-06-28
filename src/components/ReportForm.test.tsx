@@ -3,12 +3,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ReportForm from './ReportForm'
 import type { Season } from './SeasonSelector'
 
-// Mock the Vercel Blob client so photo uploads are deterministic offline.
-const uploadMock = vi.fn(async () => ({ url: 'https://blob.example/test.jpg' }))
-vi.mock('@vercel/blob/client', () => ({
-  upload: (...args: unknown[]) => uploadMock(...(args as [])),
-}))
-
 const mockOnClose = vi.fn()
 const mockOnSubmit = vi.fn()
 
@@ -71,7 +65,27 @@ describe('ReportForm', () => {
     expect(submitted.lng).toBe(-76.01)
   })
 
-  it('uploads selected photos and includes their URLs', async () => {
+  it('optimizes and uploads selected photos, including their URLs', async () => {
+    // jsdom has no canvas/createImageBitmap, so stub the image pipeline.
+    vi.stubGlobal(
+      'createImageBitmap',
+      vi.fn(async () => ({ width: 100, height: 100, close: vi.fn() })),
+    )
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as never
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
+      cb(new Blob(['x'], { type: 'image/jpeg' }))
+    }
+    // /api/upload succeeds; /api/reports is offline (exercises the fallback).
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/api/upload')) {
+          return { ok: true, json: async () => ({ url: 'https://blob.example/test.jpg' }) } as Response
+        }
+        throw new Error('offline')
+      }),
+    )
+
     render(<ReportForm {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
@@ -83,7 +97,6 @@ describe('ReportForm', () => {
     fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
 
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
-    expect(uploadMock).toHaveBeenCalledTimes(1)
     expect(mockOnSubmit.mock.calls[0][0].photo_urls).toEqual(['https://blob.example/test.jpg'])
   })
 

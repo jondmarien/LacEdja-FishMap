@@ -1,11 +1,11 @@
-import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
+import { put } from '@vercel/blob'
 import { logger } from '../src/lib/logger.js'
 
 /**
  * Resolve the Blob read-write token. Normally Vercel injects
- * BLOB_READ_WRITE_TOKEN when a Blob store is connected to the project, but if
- * the store was connected with a custom prefix the var can be named
- * <PREFIX>_READ_WRITE_TOKEN. Fall back to any such var so uploads keep working.
+ * BLOB_READ_WRITE_TOKEN when a Blob store is connected to the project; fall
+ * back to any <PREFIX>_READ_WRITE_TOKEN var so uploads keep working even if
+ * the store was connected with a custom prefix.
  */
 function resolveBlobToken(): string | undefined {
   if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN
@@ -17,44 +17,49 @@ function resolveBlobToken(): string | undefined {
   return undefined
 }
 
+/**
+ * Server-side photo upload. The client sends an already-optimized JPEG as
+ * multipart/form-data and we stream it to Blob with put(). This avoids the
+ * client-token + onUploadCompleted callback flow, which was stalling uploads
+ * (token issued, but the file never finalized into the store).
+ */
 export async function POST(request: Request) {
-  const body = (await request.json()) as HandleUploadBody
   const token = resolveBlobToken()
-
   if (!token) {
-    // Names only — never log secret values.
     const blobVars = Object.keys(process.env).filter((k) => /BLOB/i.test(k))
     logger.api('error', 'No Blob read-write token in environment', { blobVars })
     return Response.json(
       {
         error:
-          'Photo storage is not configured on the server (missing BLOB_READ_WRITE_TOKEN). Connect the Blob store to this project and redeploy.',
+          'Photo storage is not configured (missing BLOB_READ_WRITE_TOKEN). Connect the Blob store to this project and redeploy.',
       },
       { status: 500 },
     )
   }
 
+  let file: File | null = null
   try {
-    const jsonResponse = await handleUpload({
-      body,
-      request,
-      token,
-      onBeforeGenerateToken: async () => ({
-        // Allow any image type. Phone cameras (esp. iPhone) often produce
-        // HEIC/HEIF, which an explicit jpeg/png/webp list silently rejected.
-        allowedContentTypes: ['image/*'],
-        // Camera files are frequently named "image.jpg" — randomise so repeat
-        // uploads don't collide/overwrite.
-        addRandomSuffix: true,
-        // Generous cap for full-resolution phone photos.
-        maximumSizeInBytes: 40 * 1024 * 1024,
-      }),
-      onUploadCompleted: async ({ blob }) => {
-        logger.api('info', 'Photo uploaded', { url: blob.url })
-      },
-    })
+    const form = await request.formData()
+    const f = form.get('file')
+    if (f instanceof File) file = f
+  } catch (error) {
+    logger.api('error', 'Could not parse upload form', { error: String(error) })
+    return Response.json({ error: 'Invalid upload request' }, { status: 400 })
+  }
 
-    return Response.json(jsonResponse)
+  if (!file) {
+    return Response.json({ error: 'No file provided' }, { status: 400 })
+  }
+
+  try {
+    const blob = await put(file.name || 'photo.jpg', file, {
+      access: 'public',
+      addRandomSuffix: true,
+      contentType: file.type || 'image/jpeg',
+      token,
+    })
+    logger.api('info', 'Photo uploaded', { url: blob.url, bytes: file.size })
+    return Response.json({ url: blob.url })
   } catch (error) {
     logger.api('error', 'Photo upload failed', { error: String(error) })
     return Response.json({ error: (error as Error).message }, { status: 400 })

@@ -1,5 +1,4 @@
 import { useState } from 'react'
-import { upload } from '@vercel/blob/client'
 import { Camera, Crosshair, ImageSquare, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
@@ -21,23 +20,62 @@ const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-lake-500 focus:outline-none focus:ring-2 focus:ring-lake-500/25 dark:border-white/10 dark:bg-white/5 dark:text-slate-100 dark:placeholder:text-slate-500'
 const labelClass = 'mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400'
 
+const MAX_EDGE = 2048 // px on the longest side
+const JPEG_QUALITY = 0.85
+
 /**
- * Phone cameras shoot HEIC (iPhone) or HEIF (some Android) — the same
- * container format, which most non-Apple browsers cannot render in <img>.
- * Convert either to JPEG in the browser before upload so photos display
- * everywhere. heic2any (libheif) decodes both; it is lazy-imported so it
- * never touches the main bundle for ordinary JPEG/PNG uploads.
+ * Prepare a photo for upload, fully in the browser:
+ *  1. Phone cameras shoot HEIC (iPhone) / HEIF (some Android) — the same
+ *     container most non-Apple browsers can't render. Decode to JPEG first
+ *     via heic2any (lazy-imported, so non-HEIC uploads never load it).
+ *  2. Downscale to a sensible max dimension and re-encode as JPEG. This keeps
+ *     photos crisp but small (well under the serverless body limit), so the
+ *     simple server-side put() upload is reliable and pages load fast.
+ * Honors EXIF orientation so phone photos aren't sideways.
  */
-async function toUploadable(file: File): Promise<File> {
-  // Matches image/heic, image/heif, image/heif-sequence, and .heic/.heif names
-  // (some phones report an empty MIME type, so we check the extension too).
+async function processImage(file: File): Promise<File> {
+  let source: Blob = file
   const isHeicOrHeif = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
-  if (!isHeicOrHeif) return file
-  const heic2any = (await import('heic2any')).default
-  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
-  const blob = Array.isArray(out) ? out[0] : out
-  const name = file.name.replace(/\.(heic|heif)$/i, '') || 'photo'
-  return new File([blob], `${name}.jpg`, { type: 'image/jpeg' })
+  if (isHeicOrHeif) {
+    const heic2any = (await import('heic2any')).default
+    const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.92 })
+    source = Array.isArray(out) ? out[0] : out
+  }
+
+  const bitmap = await createImageBitmap(source, { imageOrientation: 'from-image' })
+  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
+  const w = Math.max(1, Math.round(bitmap.width * scale))
+  const h = Math.max(1, Math.round(bitmap.height * scale))
+
+  const canvas = document.createElement('canvas')
+  canvas.width = w
+  canvas.height = h
+  const ctx = canvas.getContext('2d')
+  if (!ctx) throw new Error('Canvas not available')
+  ctx.drawImage(bitmap, 0, 0, w, h)
+  bitmap.close?.()
+
+  const blob = await new Promise<Blob>((resolve, reject) =>
+    canvas.toBlob(
+      (b) => (b ? resolve(b) : reject(new Error('Image encoding failed'))),
+      'image/jpeg',
+      JPEG_QUALITY,
+    ),
+  )
+
+  const base = file.name.replace(/\.[^.]+$/, '') || 'photo'
+  return new File([blob], `${base}.jpg`, { type: 'image/jpeg' })
+}
+
+async function uploadPhoto(file: File): Promise<string> {
+  const processed = await processImage(file)
+  const fd = new FormData()
+  fd.append('file', processed)
+  const res = await fetch('/api/upload', { method: 'POST', body: fd })
+  if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`)
+  const data = (await res.json()) as { url?: string }
+  if (!data.url) throw new Error('Upload response missing url')
+  return data.url
 }
 
 function readSavedReporter(): string {
@@ -131,16 +169,9 @@ export default function ReportForm({
     if (photos.length > 0) {
       setUploading(true)
       try {
-        const uploadPromises = photos.map(async (raw) => {
-          const file = await toUploadable(raw)
-          const blob = await upload(file.name, file, {
-            access: 'public',
-            handleUploadUrl: '/api/upload',
-          })
-          logger.info('Photo uploaded', { filename: file.name })
-          return blob.url
-        })
-        photoUrls = [...photoUrls, ...(await Promise.all(uploadPromises))]
+        const uploaded = await Promise.all(photos.map((raw) => uploadPhoto(raw)))
+        photoUrls = [...photoUrls, ...uploaded]
+        logger.info('Photos uploaded', { count: uploaded.length })
       } catch (err) {
         // Surface the failure instead of silently saving without photos.
         logger.error('Photo upload failed', { error: String(err) })
