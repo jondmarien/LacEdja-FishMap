@@ -37,28 +37,31 @@ export async function POST(request: Request) {
     )
   }
 
-  let file: File | null = null
+  // The client sends the image as the raw request body (not multipart, which
+  // the Vercel Node Web handler doesn't reliably parse) with ?filename=.
+  const filename = new URL(request.url).searchParams.get('filename') || 'photo.jpg'
+  const contentType = request.headers.get('content-type') || 'image/jpeg'
+
+  let bytes: ArrayBuffer
   try {
-    const form = await request.formData()
-    const f = form.get('file')
-    if (f instanceof File) file = f
+    bytes = await request.arrayBuffer()
   } catch (error) {
-    logger.api('error', 'Could not parse upload form', { error: String(error) })
+    logger.api('error', 'Could not read upload body', { error: String(error) })
     return Response.json({ error: 'Invalid upload request' }, { status: 400 })
   }
 
-  if (!file) {
+  if (bytes.byteLength === 0) {
     return Response.json({ error: 'No file provided' }, { status: 400 })
   }
 
   try {
-    const blob = await put(file.name || 'photo.jpg', file, {
+    const blob = await put(filename, bytes, {
       access: 'public',
       addRandomSuffix: true,
-      contentType: file.type || 'image/jpeg',
+      contentType,
       token,
     })
-    logger.api('info', 'Photo uploaded', { url: blob.url, bytes: file.size })
+    logger.api('info', 'Photo uploaded', { url: blob.url, bytes: bytes.byteLength })
     return Response.json({ url: blob.url })
   } catch (error) {
     logger.api('error', 'Photo upload failed', { error: String(error) })

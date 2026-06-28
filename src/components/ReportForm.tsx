@@ -69,9 +69,13 @@ async function processImage(file: File): Promise<File> {
 
 async function uploadPhoto(file: File): Promise<string> {
   const processed = await processImage(file)
-  const fd = new FormData()
-  fd.append('file', processed)
-  const res = await fetch('/api/upload', { method: 'POST', body: fd })
+  // Send the image as the raw request body (the Vercel Node handler reads it
+  // via arrayBuffer(); multipart/form-data isn't reliably parsed there).
+  const res = await fetch(`/api/upload?filename=${encodeURIComponent(processed.name)}`, {
+    method: 'POST',
+    headers: { 'content-type': processed.type || 'image/jpeg' },
+    body: processed,
+  })
   if (!res.ok) throw new Error(`Upload failed (HTTP ${res.status})`)
   const data = (await res.json()) as { url?: string }
   if (!data.url) throw new Error('Upload response missing url')
