@@ -26,16 +26,6 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
 
-  const handleChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
-    setForm({ ...form, [e.target.name]: e.target.value })
-  }
-
-  const handlePhotoChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files) {
-      setPhotos(Array.from(e.target.files))
-    }
-  }
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
@@ -50,7 +40,7 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
             access: 'public',
             handleUploadUrl: '/api/upload',
           })
-          logger.info('Photo uploaded successfully', { url: blob.url })
+          logger.info('Photo uploaded', { filename: file.name })
           return blob.url
         })
         photoUrls = await Promise.all(uploadPromises)
@@ -78,10 +68,10 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         body: JSON.stringify(reportPayload),
       })
       const savedReport = await res.json()
-      logger.info('Report submitted successfully', { id: savedReport.id })
+      logger.info('Report created', { id: savedReport.id, species: savedReport.species })
       onSubmit(savedReport)
     } catch (err) {
-      logger.error('Failed to submit report', { error: String(err) })
+      logger.error('Report submission failed', { error: String(err) })
       onSubmit({ ...reportPayload, id: crypto.randomUUID() })
     }
 
@@ -98,7 +88,55 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* ... form fields remain the same ... */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label htmlFor="date" className="text-xs text-white/50">Date</label>
+              <input id="date" type="date" name="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+            </div>
+            <div>
+              <label htmlFor="time" className="text-xs text-white/50">Time</label>
+              <input id="time" type="time" name="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="species" className="text-xs text-white/50">Species</label>
+            <input id="species" type="text" name="species" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })} placeholder="Largemouth bass, Lake trout..." className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label htmlFor="length" className="text-xs text-white/50">Length (cm)</label>
+              <input id="length" type="number" name="length_cm" value={form.length_cm} onChange={(e) => setForm({ ...form, length_cm: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label htmlFor="weight" className="text-xs text-white/50">Weight (kg)</label>
+              <input id="weight" type="number" step="0.1" name="weight_kg" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label htmlFor="count" className="text-xs text-white/50">Count</label>
+              <input id="count" type="number" name="count" value={form.count} onChange={(e) => setForm({ ...form, count: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label htmlFor="bait" className="text-xs text-white/50">Bait / Lure</label>
+            <input id="bait" type="text" name="bait" value={form.bait} onChange={(e) => setForm({ ...form, bait: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+          </div>
+
+          <div>
+            <label htmlFor="notes" className="text-xs text-white/50">Notes</label>
+            <textarea id="notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm resize-y" />
+          </div>
+
+          <div>
+            <label htmlFor="photos" className="text-xs text-white/50">Photos (optional)</label>
+            <input id="photos" type="file" accept="image/*" multiple onChange={(e) => {
+              if (e.target.files) setPhotos(Array.from(e.target.files))
+            }} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:bg-white/10" />
+            {photos.length > 0 && <div className="text-xs text-white/50 mt-1">{photos.length} photo(s) selected</div>}
+          </div>
+
           <div className="pt-2 flex gap-3">
             <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm">Cancel</button>
             <button type="submit" disabled={submitting} className="flex-1 py-2.5 rounded-xl bg-white text-black font-medium text-sm disabled:opacity-60">
