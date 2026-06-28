@@ -5,11 +5,13 @@ import 'maplibre-gl/dist/maplibre-gl.css';
 interface LacEdjaMapProps {
   center?: [number, number];
   zoom?: number;
+  onMapClick?: (lat: number, lng: number) => void;
 }
 
 export default function LacEdjaMap({
   center = [-76.01, 46.18],
   zoom = 13,
+  onMapClick,
 }: LacEdjaMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null);
   const map = useRef<maplibregl.Map | null>(null);
@@ -26,16 +28,23 @@ export default function LacEdjaMap({
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
 
+    if (onMapClick) {
+      map.current.on('click', (e) => {
+        const { lat, lng } = e.lngLat;
+        onMapClick(lat, lng);
+      });
+    }
+
     return () => {
       map.current?.remove();
       map.current = null;
     };
-  }, [center, zoom]);
+  }, [center, zoom, onMapClick]);
 
   return (
     <div
       ref={mapContainer}
-      className="w-full h-[70vh] rounded-2xl overflow-hidden border border-white/10"
+      className="w-full h-[70vh] rounded-2xl overflow-hidden border border-white/10 cursor-crosshair"
     />
   );
 }
