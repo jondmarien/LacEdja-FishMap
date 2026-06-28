@@ -38,30 +38,27 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
-    setUploading(true)
 
     let photoUrls: string[] = []
 
-    // Upload photos to Vercel Blob if any
     if (photos.length > 0) {
+      setUploading(true)
       try {
         const uploadPromises = photos.map(async (file) => {
           const blob = await upload(file.name, file, {
             access: 'public',
-            handleUploadUrl: '/api/upload', // We'll create this later
+            handleUploadUrl: '/api/upload',
           })
           return blob.url
         })
         photoUrls = await Promise.all(uploadPromises)
       } catch (err) {
         console.error('Photo upload failed', err)
-        // Fallback: continue without photos for now
       }
+      setUploading(false)
     }
 
-    setUploading(false)
-
-    const report = {
+    const reportPayload = {
       ...form,
       lat,
       lng,
@@ -70,15 +67,22 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
       weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
       count: parseInt(form.count),
       photo_urls: photoUrls,
-      created_at: new Date().toISOString(),
     }
 
-    // TODO: Replace with real POST to /api/reports
-    console.log('Submitting report with photos:', report)
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reportPayload),
+      })
+      const savedReport = await res.json()
+      onSubmit(savedReport)
+    } catch (err) {
+      console.error('Failed to submit report', err)
+      // Fallback: still call onSubmit for local preview
+      onSubmit({ ...reportPayload, id: crypto.randomUUID() })
+    }
 
-    await new Promise((r) => setTimeout(r, 300))
-
-    onSubmit(report)
     setSubmitting(false)
     onClose()
   }
@@ -92,35 +96,56 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          {/* Date/Time/Species/Size fields remain the same as before */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="text-xs text-white/50">Date</label>
+              <input type="date" name="date" value={form.date} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+            </div>
+            <div>
+              <label className="text-xs text-white/50">Time</label>
+              <input type="time" name="time" value={form.time} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-white/50">Species</label>
+            <input type="text" name="species" value={form.species} onChange={handleChange} placeholder="Largemouth bass, Lake trout..." className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+          </div>
+
+          <div className="grid grid-cols-3 gap-4">
+            <div>
+              <label className="text-xs text-white/50">Length (cm)</label>
+              <input type="number" name="length_cm" value={form.length_cm} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-white/50">Weight (kg)</label>
+              <input type="number" step="0.1" name="weight_kg" value={form.weight_kg} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+            <div>
+              <label className="text-xs text-white/50">Count</label>
+              <input type="number" name="count" value={form.count} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            </div>
+          </div>
+
+          <div>
+            <label className="text-xs text-white/50">Bait / Lure</label>
+            <input type="text" name="bait" value={form.bait} onChange={handleChange} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+          </div>
+
+          <div>
+            <label className="text-xs text-white/50">Notes</label>
+            <textarea name="notes" value={form.notes} onChange={handleChange} rows={2} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm resize-y" />
+          </div>
 
           <div>
             <label className="text-xs text-white/50">Photos (optional)</label>
-            <input
-              type="file"
-              accept="image/*"
-              multiple
-              onChange={handlePhotoChange}
-              className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:bg-white/10 hover:file:bg-white/20"
-            />
-            {photos.length > 0 && (
-              <div className="text-xs text-white/50 mt-1">{photos.length} photo(s) selected</div>
-            )}
+            <input type="file" accept="image/*" multiple onChange={handlePhotoChange} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:bg-white/10" />
+            {photos.length > 0 && <div className="text-xs text-white/50 mt-1">{photos.length} photo(s) selected</div>}
           </div>
 
           <div className="pt-2 flex gap-3">
-            <button
-              type="button"
-              onClick={onClose}
-              className="flex-1 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm"
-            >
-              Cancel
-            </button>
-            <button
-              type="submit"
-              disabled={submitting}
-              className="flex-1 py-2.5 rounded-xl bg-white text-black font-medium text-sm disabled:opacity-60"
-            >
+            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm">Cancel</button>
+            <button type="submit" disabled={submitting} className="flex-1 py-2.5 rounded-xl bg-white text-black font-medium text-sm disabled:opacity-60">
               {submitting ? (uploading ? 'Uploading photos...' : 'Saving...') : 'Save Report'}
             </button>
           </div>
