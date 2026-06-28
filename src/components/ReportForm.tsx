@@ -21,6 +21,22 @@ const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-lake-500 focus:outline-none focus:ring-2 focus:ring-lake-500/25 dark:border-white/10 dark:bg-white/5 dark:text-slate-100 dark:placeholder:text-slate-500'
 const labelClass = 'mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400'
 
+/**
+ * iPhone cameras shoot HEIC/HEIF, which most non-Apple browsers cannot render
+ * in <img>. Convert those to JPEG in the browser before upload so photos
+ * display everywhere. heic2any is lazy-imported so it never touches the main
+ * bundle for non-HEIC uploads.
+ */
+async function toUploadable(file: File): Promise<File> {
+  const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
+  if (!isHeic) return file
+  const heic2any = (await import('heic2any')).default
+  const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
+  const blob = Array.isArray(out) ? out[0] : out
+  const name = file.name.replace(/\.(heic|heif)$/i, '') || 'photo'
+  return new File([blob], `${name}.jpg`, { type: 'image/jpeg' })
+}
+
 function readSavedReporter(): string {
   try {
     return localStorage.getItem(REPORTER_KEY) ?? ''
@@ -112,7 +128,8 @@ export default function ReportForm({
     if (photos.length > 0) {
       setUploading(true)
       try {
-        const uploadPromises = photos.map(async (file) => {
+        const uploadPromises = photos.map(async (raw) => {
+          const file = await toUploadable(raw)
           const blob = await upload(file.name, file, {
             access: 'public',
             handleUploadUrl: '/api/upload',
