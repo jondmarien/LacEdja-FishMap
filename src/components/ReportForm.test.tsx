@@ -66,11 +66,24 @@ describe('ReportForm', () => {
   })
 
   it('optimizes and uploads selected photos, including their URLs', async () => {
-    // jsdom has no canvas/createImageBitmap, so stub the image pipeline.
-    vi.stubGlobal(
-      'createImageBitmap',
-      vi.fn(async () => ({ width: 100, height: 100, close: vi.fn() })),
-    )
+    // jsdom doesn't decode images or render canvas, so stub the pipeline.
+    URL.createObjectURL = vi.fn(() => 'blob:stub')
+    URL.revokeObjectURL = vi.fn()
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      configurable: true,
+      set() {
+        // Fire onload on the next microtask, mimicking a decoded image.
+        Promise.resolve().then(() => this.onload?.(new Event('load')))
+      },
+    })
     HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as never
     HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
       cb(new Blob(['x'], { type: 'image/jpeg' }))

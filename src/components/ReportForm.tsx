@@ -23,6 +23,23 @@ const labelClass = 'mb-1 block text-xs font-medium text-slate-500 dark:text-slat
 const MAX_EDGE = 2048 // px on the longest side
 const JPEG_QUALITY = 0.85
 
+/** Decode a Blob into a loaded <img>. Works across Chrome, Firefox, Safari
+ * (desktop + mobile) — more reliable than createImageBitmap, which produced
+ * blank output on some mobile browsers. EXIF orientation is applied by the
+ * browser's default image-orientation handling. */
+function loadImageElement(blob: Blob): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const url = URL.createObjectURL(blob)
+    const img = new Image()
+    img.onload = () => resolve(img)
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      reject(new Error('Could not decode image'))
+    }
+    img.src = url
+  })
+}
+
 /**
  * Prepare a photo for upload, fully in the browser:
  *  1. Phone cameras shoot HEIC (iPhone) / HEIF (some Android) — the same
@@ -31,7 +48,6 @@ const JPEG_QUALITY = 0.85
  *  2. Downscale to a sensible max dimension and re-encode as JPEG. This keeps
  *     photos crisp but small (well under the serverless body limit), so the
  *     simple server-side put() upload is reliable and pages load fast.
- * Honors EXIF orientation so phone photos aren't sideways.
  */
 async function processImage(file: File): Promise<File> {
   let source: Blob = file
@@ -42,18 +58,28 @@ async function processImage(file: File): Promise<File> {
     source = Array.isArray(out) ? out[0] : out
   }
 
-  const bitmap = await createImageBitmap(source, { imageOrientation: 'from-image' })
-  const scale = Math.min(1, MAX_EDGE / Math.max(bitmap.width, bitmap.height))
-  const w = Math.max(1, Math.round(bitmap.width * scale))
-  const h = Math.max(1, Math.round(bitmap.height * scale))
+  const img = await loadImageElement(source)
+  const iw = img.naturalWidth || img.width
+  const ih = img.naturalHeight || img.height
+  if (!iw || !ih) {
+    if (img.src) URL.revokeObjectURL(img.src)
+    throw new Error('Image has no readable dimensions')
+  }
+
+  const scale = Math.min(1, MAX_EDGE / Math.max(iw, ih))
+  const w = Math.max(1, Math.round(iw * scale))
+  const h = Math.max(1, Math.round(ih * scale))
 
   const canvas = document.createElement('canvas')
   canvas.width = w
   canvas.height = h
   const ctx = canvas.getContext('2d')
-  if (!ctx) throw new Error('Canvas not available')
-  ctx.drawImage(bitmap, 0, 0, w, h)
-  bitmap.close?.()
+  if (!ctx) {
+    if (img.src) URL.revokeObjectURL(img.src)
+    throw new Error('Canvas not available')
+  }
+  ctx.drawImage(img, 0, 0, w, h)
+  if (img.src) URL.revokeObjectURL(img.src)
 
   const blob = await new Promise<Blob>((resolve, reject) =>
     canvas.toBlob(
