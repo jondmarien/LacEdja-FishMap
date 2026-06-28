@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import maplibregl from 'maplibre-gl';
 import 'maplibre-gl/dist/maplibre-gl.css';
+import { logger } from '../lib/logger';
 
 interface LacEdjaMapProps {
   center?: [number, number];
@@ -19,21 +20,34 @@ export default function LacEdjaMap({
   useEffect(() => {
     if (map.current || !mapContainer.current) return;
 
-    map.current = new maplibregl.Map({
-      container: mapContainer.current,
-      style: 'https://demotiles.maplibre.org/style.json',
-      center,
-      zoom,
-      attributionControl: false,
-    });
-
-    map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
-
-    if (onMapClick) {
-      map.current.on('click', (e) => {
-        const { lat, lng } = e.lngLat;
-        onMapClick(lat, lng);
+    try {
+      map.current = new maplibregl.Map({
+        container: mapContainer.current,
+        style: 'https://demotiles.maplibre.org/style.json',
+        center,
+        zoom,
+        attributionControl: false,
       });
+
+      map.current.on('load', () => {
+        logger.info('Map loaded successfully');
+      });
+
+      map.current.on('error', (e) => {
+        logger.error('Map error', { error: e.error?.message || 'Unknown map error' });
+      });
+
+      map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
+
+      if (onMapClick) {
+        map.current.on('click', (e) => {
+          const { lat, lng } = e.lngLat;
+          logger.debug('Map clicked', { lat, lng });
+          onMapClick(lat, lng);
+        });
+      }
+    } catch (error) {
+      logger.error('Failed to initialize map', { error: String(error) });
     }
 
     return () => {
