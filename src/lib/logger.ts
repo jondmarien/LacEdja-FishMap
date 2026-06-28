@@ -6,9 +6,13 @@ interface LogContext {
 
 class Logger {
   private isServer = typeof window === 'undefined'
+  
+  // Safe environment detection that works in both browser and Node.js
   private isProduction = this.isServer 
-    ? process.env.NODE_ENV === 'production' 
-    : import.meta.env?.PROD ?? false
+    ? process.env.NODE_ENV === 'production'
+    : (typeof import.meta !== 'undefined' && 
+       (import.meta as any).env && 
+       (import.meta as any).env.PROD) ?? false
 
   private format(level: LogLevel, message: string, context?: LogContext) {
     const timestamp = new Date().toISOString()
