@@ -1,4 +1,5 @@
 import { handleUpload, type HandleUploadBody } from '@vercel/blob/client'
+import { logger } from '../src/lib/logger'
 
 export async function POST(request: Request) {
   const body = await request.json() as HandleUploadBody
@@ -11,12 +12,13 @@ export async function POST(request: Request) {
         allowedContentTypes: ['image/jpeg', 'image/png', 'image/webp'],
       }),
       onUploadCompleted: async ({ blob }) => {
-        console.log('Upload completed:', blob.url)
+        logger.api('info', 'Photo uploaded', { url: blob.url })
       },
     })
 
     return Response.json(jsonResponse)
   } catch (error) {
+    logger.api('error', 'Photo upload failed', { error: String(error) })
     return Response.json({ error: (error as Error).message }, { status: 400 })
   }
 }

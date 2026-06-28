@@ -1,11 +1,13 @@
 import { sql } from '@vercel/postgres'
+import { logger } from '../src/lib/logger'
 
 export async function GET() {
   try {
     const { rows } = await sql`SELECT * FROM reports ORDER BY created_at DESC LIMIT 100`
+    logger.api('info', 'Fetched reports', { count: rows.length })
     return Response.json(rows)
   } catch (error) {
-    console.error('Database error:', error)
+    logger.api('error', 'Failed to fetch reports', { error: String(error) })
     return Response.json({ error: 'Failed to fetch reports' }, { status: 500 })
   }
 }
@@ -40,9 +42,10 @@ export async function POST(request: Request) {
       )
       RETURNING *
     `
+    logger.api('info', 'Report created', { id: rows[0].id, species })
     return Response.json(rows[0], { status: 201 })
   } catch (error) {
-    console.error('Insert error:', error)
+    logger.api('error', 'Failed to create report', { error: String(error) })
     return Response.json({ error: 'Failed to create report' }, { status: 500 })
   }
 }

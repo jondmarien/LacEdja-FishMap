@@ -2,6 +2,7 @@ import { useState } from 'react'
 import LacEdjaMap from './components/LacEdjaMap'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
+import { logger } from './lib/logger'
 
 interface Report {
   id: string
@@ -27,6 +28,7 @@ export default function App() {
   const filteredReports = reports.filter(r => r.season === season)
 
   const handleMapClick = (lat: number, lng: number) => {
+    logger.info('Map clicked', { lat, lng })
     setPendingLocation({ lat, lng })
     setShowForm(true)
   }
@@ -37,11 +39,12 @@ export default function App() {
       ...reportData,
     }
     setReports(prev => [...prev, newReport])
+    logger.info('Report added locally', { id: newReport.id, species: newReport.species })
   }
 
   return (
     <div className="min-h-screen bg-[#0a0a0a] text-white">
-      {/* Header */}
+      {/* ... rest of the UI stays the same ... */}
       <header className="border-b border-white/10 bg-[#0a0a0a]/95 backdrop-blur sticky top-0 z-50">
         <div className="max-w-6xl mx-auto px-8 h-20 flex items-center justify-between">
           <div className="flex items-center gap-4">
@@ -56,7 +59,7 @@ export default function App() {
       </header>
 
       <main className="max-w-6xl mx-auto px-8 pt-10 pb-20">
-        {/* Hero */}
+        {/* Hero + Map + Reports sections remain the same */}
         <div className="mb-10">
           <div className="max-w-2xl">
             <div className="text-xs tracking-[2px] text-white/40 mb-3">PRIVATE • FAMILY USE</div>
@@ -65,7 +68,6 @@ export default function App() {
           </div>
         </div>
 
-        {/* Map */}
         <div className="mb-16">
           <div className="flex items-center justify-between mb-4">
             <div>
@@ -81,7 +83,6 @@ export default function App() {
           <div className="text-center text-xs text-white/40 mt-3">Click anywhere on the water to log a catch</div>
         </div>
 
-        {/* Reports */}
         <div>
           <div className="flex items-baseline justify-between mb-6">
             <div>
