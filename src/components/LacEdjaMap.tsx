@@ -24,6 +24,7 @@ export default function LacEdjaMap({
       style: 'https://demotiles.maplibre.org/style.json',
       center,
       zoom,
+      attributionControl: false,
     });
 
     map.current.addControl(new maplibregl.NavigationControl(), 'top-right');
@@ -42,9 +43,9 @@ export default function LacEdjaMap({
   }, [center, zoom, onMapClick]);
 
   return (
-    <div
-      ref={mapContainer}
-      className="w-full h-[70vh] rounded-2xl overflow-hidden border border-white/10 cursor-crosshair"
+    <div 
+      ref={mapContainer} 
+      className="w-full h-full min-h-[620px]"
     />
   );
 }
