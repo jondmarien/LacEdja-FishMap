@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { Analytics } from '@vercel/analytics/react'
-import { Camera, Fish, MapPin, PencilSimple, Plus, Ruler, Trash } from '@phosphor-icons/react'
+import { DownloadSimple, Fish, MapPin, PencilSimple, Plus, Ruler, Trash } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
 import Logo from './components/Logo'
@@ -26,6 +26,28 @@ function writeTokens(tokens: Record<string, string>) {
     localStorage.setItem(TOKENS_KEY, JSON.stringify(tokens))
   } catch {
     // ignore storage failures
+  }
+}
+
+// Force-download a (cross-origin) blob image. Vercel Blob serves with open
+// CORS, so we can fetch it and trigger a real download; fall back to opening
+// it in a new tab if the fetch is blocked.
+async function downloadImage(url: string, filename: string) {
+  try {
+    const res = await fetch(url)
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const objectUrl = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = objectUrl
+    a.download = filename
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(objectUrl)
+  } catch (err) {
+    logger.warn('Photo download fell back to new tab', { error: String(err) })
+    window.open(url, '_blank', 'noopener')
   }
 }
 
@@ -77,6 +99,7 @@ export default function App() {
         count: r.count,
         bait: r.bait,
         reporter: r.reporter,
+        photo_urls: r.photo_urls,
       })),
     [filteredReports],
   )
@@ -286,17 +309,44 @@ export default function App() {
                       </p>
                     )}
 
+                    {report.photo_urls && report.photo_urls.length > 0 && (
+                      <div className="mt-3 grid grid-cols-3 gap-2">
+                        {report.photo_urls.map((url, idx) => (
+                          <div
+                            key={url}
+                            className="group relative aspect-square overflow-hidden rounded-lg border border-lake-100 bg-lake-50"
+                          >
+                            <a href={url} target="_blank" rel="noopener noreferrer">
+                              <img
+                                src={url}
+                                alt={`${report.species || 'catch'} photo ${idx + 1}`}
+                                loading="lazy"
+                                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
+                              />
+                            </a>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                downloadImage(
+                                  url,
+                                  `${(report.species || 'catch').replace(/\s+/g, '-').toLowerCase()}-${report.date}-${idx + 1}.jpg`,
+                                )
+                              }
+                              aria-label="Download photo"
+                              className="absolute bottom-1 right-1 rounded-md bg-white/90 p-1 text-slate-600 opacity-0 shadow-sm transition-opacity hover:text-lake-700 focus:opacity-100 group-hover:opacity-100"
+                            >
+                              <DownloadSimple size={14} weight="bold" />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
                     <div className="mt-4 flex items-end justify-between gap-2 pt-1">
                       <div className="flex items-center gap-3 text-xs text-slate-400">
                         {report.reporter && (
                           <span className="font-medium text-slate-500">by {report.reporter}</span>
                         )}
-                        {report.photo_urls && report.photo_urls.length > 0 ? (
-                          <span className="flex items-center gap-1">
-                            <Camera size={14} />
-                            {report.photo_urls.length}
-                          </span>
-                        ) : null}
                       </div>
 
                       {canManage && (

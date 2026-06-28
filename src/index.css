@@ -113,6 +113,19 @@ body {
   color: #94a3b8;
   margin-top: 4px;
 }
+.edja-popup-photo {
+  display: block;
+  margin-bottom: 8px;
+  border-radius: 8px;
+  overflow: hidden;
+  line-height: 0;
+}
+.edja-popup-photo img {
+  width: 100%;
+  height: 96px;
+  object-fit: cover;
+  display: block;
+}
 
 /* Respect reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {

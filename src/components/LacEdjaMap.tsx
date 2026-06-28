@@ -15,6 +15,7 @@ export interface MapMarker {
   count?: number
   bait?: string
   reporter?: string
+  photo_urls?: string[]
 }
 
 function escapeHtml(value: string): string {
@@ -39,9 +40,18 @@ function popupHtml(marker: MapMarker): string {
   if (marker.weight_kg) stats.push(`${marker.weight_kg} kg`)
   if (marker.count && marker.count > 1) stats.push(`${marker.count} fish`)
   const when = [marker.date, marker.time].filter(Boolean).join(' · ')
+  const photo = marker.photo_urls?.[0]
+  const photoUrl = photo ? encodeURI(photo) : ''
 
   return `
     <div class="edja-popup">
+      ${
+        photoUrl
+          ? `<a class="edja-popup-photo" href="${photoUrl}" target="_blank" rel="noopener noreferrer" title="Open photo">
+               <img src="${photoUrl}" alt="${escapeHtml(marker.species || 'catch')} photo" loading="lazy" />
+             </a>`
+          : ''
+      }
       <div class="edja-popup-title">${escapeHtml(marker.species || 'Catch')}</div>
       ${when ? `<div class="edja-popup-meta">${escapeHtml(when)}</div>` : ''}
       ${stats.length ? `<div class="edja-popup-stats">${escapeHtml(stats.join(' · '))}</div>` : ''}

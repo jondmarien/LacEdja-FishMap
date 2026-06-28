@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { upload } from '@vercel/blob/client'
-import { Crosshair, X } from '@phosphor-icons/react'
+import { Camera, Crosshair, ImageSquare, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
 import type { Report } from '../lib/reports'
@@ -59,6 +59,12 @@ export default function ReportForm({
   })
   const [locating, setLocating] = useState(false)
   const [locError, setLocError] = useState<string | null>(null)
+
+  const addPhotos = (list: FileList | null) => {
+    if (list && list.length > 0) {
+      setPhotos((prev) => [...prev, ...Array.from(list)])
+    }
+  }
 
   const useMyLocation = () => {
     if (!('geolocation' in navigator)) {
@@ -339,21 +345,54 @@ export default function ReportForm({
           </div>
 
           <div>
-            <label htmlFor="photos" className={labelClass}>
-              Photos (optional)
-            </label>
+            <span className={labelClass}>Photos (optional)</span>
+            <div className="flex flex-wrap gap-2">
+              <label
+                htmlFor="camera"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-lake-200 bg-white px-3 py-2 text-sm font-medium text-lake-700 transition-colors hover:bg-lake-50"
+              >
+                <Camera size={16} weight="bold" />
+                Take photo
+              </label>
+              <label
+                htmlFor="photos"
+                className="inline-flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+              >
+                <ImageSquare size={16} weight="bold" />
+                Choose photos
+              </label>
+            </div>
+            {/* Camera capture (live shot on mobile) */}
+            <input
+              id="camera"
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={(e) => addPhotos(e.target.files)}
+            />
+            {/* Library / file picker (multiple) */}
             <input
               id="photos"
               type="file"
               accept="image/*"
               multiple
-              onChange={(e) => {
-                if (e.target.files) setPhotos(Array.from(e.target.files))
-              }}
-              className="w-full text-sm text-slate-500 file:mr-3 file:rounded-full file:border-0 file:bg-lake-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-lake-700 hover:file:bg-lake-100"
+              className="hidden"
+              onChange={(e) => addPhotos(e.target.files)}
             />
             {photos.length > 0 && (
-              <div className="mt-1 text-xs text-slate-500">{photos.length} photo(s) selected</div>
+              <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+                <span>
+                  {photos.length} photo{photos.length > 1 ? 's' : ''} ready
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setPhotos([])}
+                  className="font-medium text-slate-400 hover:text-slate-600"
+                >
+                  Clear
+                </button>
+              </div>
             )}
           </div>
 
