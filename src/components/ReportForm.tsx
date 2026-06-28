@@ -53,6 +53,7 @@ export default function ReportForm({
   const [photos, setPhotos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [uploadError, setUploadError] = useState<string | null>(null)
   const [coords, setCoords] = useState({
     lat: report?.lat ?? lat,
     lng: report?.lng ?? lng,
@@ -97,6 +98,7 @@ export default function ReportForm({
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
     setSubmitting(true)
+    setUploadError(null)
 
     // Remember the reporter name on this device for next time.
     try {
@@ -120,7 +122,14 @@ export default function ReportForm({
         })
         photoUrls = [...photoUrls, ...(await Promise.all(uploadPromises))]
       } catch (err) {
+        // Surface the failure instead of silently saving without photos.
         logger.error('Photo upload failed', { error: String(err) })
+        setUploadError(
+          'Photos could not be uploaded (they may be too large or the network dropped). You can remove them and save, or try again.',
+        )
+        setUploading(false)
+        setSubmitting(false)
+        return
       }
       setUploading(false)
     }
@@ -381,17 +390,25 @@ export default function ReportForm({
               onChange={(e) => addPhotos(e.target.files)}
             />
             {photos.length > 0 && (
-              <div className="mt-2 flex items-center justify-between text-xs text-slate-500">
+              <div className="mt-2 flex items-center justify-between text-xs text-slate-500 dark:text-slate-400">
                 <span>
                   {photos.length} photo{photos.length > 1 ? 's' : ''} ready
                 </span>
                 <button
                   type="button"
-                  onClick={() => setPhotos([])}
+                  onClick={() => {
+                    setPhotos([])
+                    setUploadError(null)
+                  }}
                   className="font-medium text-slate-400 hover:text-slate-600 dark:hover:text-slate-200"
                 >
                   Clear
                 </button>
+              </div>
+            )}
+            {uploadError && (
+              <div className="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+                {uploadError}
               </div>
             )}
           </div>

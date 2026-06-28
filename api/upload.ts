@@ -9,7 +9,14 @@ export async function POST(request: Request) {
       body,
       request,
       onBeforeGenerateToken: async () => ({
-        allowedContentTypes: ['image/jpeg', 'image/png', 'image/webp'],
+        // Allow any image type. Phone cameras (esp. iPhone) often produce
+        // HEIC/HEIF, which an explicit jpeg/png/webp list silently rejected.
+        allowedContentTypes: ['image/*'],
+        // Camera files are frequently named "image.jpg" — randomise so repeat
+        // uploads don't collide/overwrite.
+        addRandomSuffix: true,
+        // Generous cap for full-resolution phone photos.
+        maximumSizeInBytes: 25 * 1024 * 1024,
       }),
       onUploadCompleted: async ({ blob }) => {
         logger.api('info', 'Photo uploaded', { url: blob.url })
