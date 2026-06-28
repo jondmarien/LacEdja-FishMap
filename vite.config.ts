@@ -28,6 +28,9 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // Don't serve the SPA shell for /api/* navigations (e.g. opening a
+        // photo via /api/photo in a new tab) — let them hit the network.
+        navigateFallbackDenylist: [/^\/api\//],
         runtimeCaching: [
           {
             // Esri World Imagery basemap tiles
