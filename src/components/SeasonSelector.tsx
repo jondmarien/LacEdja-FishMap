@@ -11,9 +11,8 @@ const seasons: Season[] = ['Spring', 'Summer', 'Fall', 'Winter']
 
 export default function SeasonSelector({ value, onChange }: SeasonSelectorProps) {
   const handleChange = (season: Season) => {
-    if (season !== value) {
-      logger.info('Season changed', { from: value, to: season })
-    }
+    if (season === value) return
+    logger.info('Season changed', { from: value, to: season })
     onChange(season)
   }
 

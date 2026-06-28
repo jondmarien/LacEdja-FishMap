@@ -63,7 +63,14 @@ class Logger {
   }
 
   api(level: LogLevel, message: string, context?: LogContext) {
-    console.log(this.format(level, `[API] ${message}`, context))
+    const formatted = this.format(level, `[API] ${message}`, context)
+    if (level === 'error') {
+      console.error(formatted)
+    } else if (level === 'warn') {
+      console.warn(formatted)
+    } else {
+      console.log(formatted)
+    }
   }
 }
 

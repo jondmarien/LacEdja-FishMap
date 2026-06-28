@@ -1,7 +1,13 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ReportForm from './ReportForm'
 import type { Season } from './SeasonSelector'
+
+// Mock the Vercel Blob client so photo uploads are deterministic offline.
+const uploadMock = vi.fn(async () => ({ url: 'https://blob.example/test.jpg' }))
+vi.mock('@vercel/blob/client', () => ({
+  upload: (...args: unknown[]) => uploadMock(...(args as [])),
+}))
 
 const mockOnClose = vi.fn()
 const mockOnSubmit = vi.fn()
@@ -17,6 +23,12 @@ const defaultProps = {
 describe('ReportForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    // Default: API unreachable, so the form uses its offline fallback path.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+  })
+
+  afterEach(() => {
+    vi.unstubAllGlobals()
   })
 
   it('renders all main form fields', () => {
@@ -32,58 +44,53 @@ describe('ReportForm', () => {
     expect(screen.getByLabelText(/photos/i)).toBeInTheDocument()
   })
 
-  it('requires species field', () => {
+  it('shows the catch location and a "use my location" control', () => {
     render(<ReportForm {...defaultProps} />)
-    
-    const submitButton = screen.getByRole('button', { name: /save report/i })
-    expect(submitButton).not.toBeDisabled() // Form allows submission, validation is on submit
+
+    expect(screen.getByText('46.18000, -76.01000')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /use my location/i })).toBeInTheDocument()
   })
 
-  it('submits form with correct data', async () => {
+  it('builds the payload from the form (numbers parsed, season + spot included)', async () => {
     render(<ReportForm {...defaultProps} />)
 
     fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
       target: { value: 'Smallmouth bass' },
     })
-    fireEvent.change(screen.getByLabelText(/length/i), {
-      target: { value: '42' },
+    fireEvent.change(screen.getByLabelText(/length/i), { target: { value: '42' } })
+
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+
+    const submitted = mockOnSubmit.mock.calls[0][0]
+    expect(submitted.species).toBe('Smallmouth bass')
+    expect(submitted.length_cm).toBe(42)
+    expect(submitted.season).toBe('Summer')
+    expect(submitted.lat).toBe(46.18)
+    expect(submitted.lng).toBe(-76.01)
+  })
+
+  it('uploads selected photos and includes their URLs', async () => {
+    render(<ReportForm {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Pike' },
     })
+    const file = new File(['x'], 'fish.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText(/photos/i), { target: { files: [file] } })
 
-    const submitButton = screen.getByRole('button', { name: /save report/i })
-    fireEvent.click(submitButton)
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
 
-    await waitFor(() => {
-      expect(mockOnSubmit).toHaveBeenCalled()
-    })
-
-    const submittedData = mockOnSubmit.mock.calls[0][0]
-    expect(submittedData.species).toBe('Smallmouth bass')
-    expect(submittedData.length_cm).toBe(42)
-    expect(submittedData.season).toBe('Summer')
-    expect(submittedData.lat).toBe(46.18)
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    expect(uploadMock).toHaveBeenCalledTimes(1)
+    expect(mockOnSubmit.mock.calls[0][0].photo_urls).toEqual(['https://blob.example/test.jpg'])
   })
 
   it('calls onClose when cancel is clicked', () => {
     render(<ReportForm {...defaultProps} />)
-    
+
     fireEvent.click(screen.getByRole('button', { name: /cancel/i }))
     expect(mockOnClose).toHaveBeenCalled()
-  })
-
-  it('shows uploading state when photos are selected and submitted', async () => {
-    render(<ReportForm {...defaultProps} />)
-
-    const fileInput = screen.getByLabelText(/photos/i)
-    const file = new File(['dummy'], 'fish.jpg', { type: 'image/jpeg' })
-    
-    fireEvent.change(fileInput, { target: { files: [file] } })
-
-    const submitButton = screen.getByRole('button', { name: /save report/i })
-    fireEvent.click(submitButton)
-
-    // Note: Full upload mocking would require more setup
-    await waitFor(() => {
-      expect(screen.getByText(/saving/i)).toBeInTheDocument()
-    })
   })
 })
