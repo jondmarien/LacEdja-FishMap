@@ -25,6 +25,37 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
   const [photos, setPhotos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [coords, setCoords] = useState({ lat, lng })
+  const [locating, setLocating] = useState(false)
+  const [locError, setLocError] = useState<string | null>(null)
+
+  const useMyLocation = () => {
+    if (!('geolocation' in navigator)) {
+      setLocError('Location is not available on this device.')
+      return
+    }
+    setLocating(true)
+    setLocError(null)
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        setCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude })
+        setLocating(false)
+        logger.info('Used device location for catch', {
+          accuracy_m: Math.round(pos.coords.accuracy),
+        })
+      },
+      (err) => {
+        setLocating(false)
+        setLocError(
+          err.code === err.PERMISSION_DENIED
+            ? 'Location permission denied. Tap the map to set the spot instead.'
+            : 'Could not get your location. Tap the map instead.',
+        )
+        logger.warn('Geolocation failed', { code: err.code, message: err.message })
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 0 },
+    )
+  }
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault()
@@ -52,8 +83,8 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
 
     const reportPayload = {
       ...form,
-      lat,
-      lng,
+      lat: coords.lat,
+      lng: coords.lng,
       season,
       length_cm: form.length_cm ? parseFloat(form.length_cm) : null,
       weight_kg: form.weight_kg ? parseFloat(form.weight_kg) : null,
@@ -91,6 +122,26 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
+          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <div className="text-xs text-white/50">Location</div>
+                <div className="font-mono text-sm tabular-nums">
+                  {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={useMyLocation}
+                disabled={locating}
+                className="shrink-0 rounded-full border border-white/20 px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-60"
+              >
+                {locating ? 'Locating…' : '📍 Use my location'}
+              </button>
+            </div>
+            {locError && <div className="mt-2 text-xs text-amber-400">{locError}</div>}
+          </div>
+
           <div className="grid grid-cols-2 gap-4">
             <div>
               <label htmlFor="date" className="text-xs text-white/50">Date</label>

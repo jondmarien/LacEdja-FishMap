@@ -77,6 +77,16 @@ export default function LacEdjaMap({
 
       map.current.addControl(new maplibregl.NavigationControl(), 'top-right')
 
+      // Optional "focus on me" — asks for permission and centers on the user.
+      map.current.addControl(
+        new maplibregl.GeolocateControl({
+          positionOptions: { enableHighAccuracy: true },
+          trackUserLocation: true,
+          showUserLocation: true,
+        }),
+        'top-right',
+      )
+
       map.current.on('click', (e) => {
         const { lat, lng } = e.lngLat
         logger.debug('Map clicked', { lat, lng })
