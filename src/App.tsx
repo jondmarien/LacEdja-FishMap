@@ -1,24 +1,10 @@
-import { useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { Analytics } from '@vercel/analytics/react'
 import LacEdjaMap from './components/LacEdjaMap'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
+import { normalizeReport, type Report } from './lib/reports'
 import { logger } from './lib/logger'
-
-interface Report {
-  id: string
-  lat: number
-  lng: number
-  season: Season
-  species: string
-  date: string
-  time?: string
-  length_cm?: number
-  weight_kg?: number
-  bait?: string
-  notes?: string
-  photo_urls?: string[]
-}
 
 export default function App() {
   const [season, setSeason] = useState<Season>('Summer')
@@ -26,21 +12,44 @@ export default function App() {
   const [showForm, setShowForm] = useState(false)
   const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null)
 
-  const filteredReports = reports.filter(r => r.season === season)
+  // Load existing catches from the API on first mount.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await fetch('/api/reports')
+        if (!res.ok) throw new Error(`HTTP ${res.status}`)
+        const rows = await res.json()
+        if (cancelled || !Array.isArray(rows)) return
+        setReports(rows.map(normalizeReport))
+        logger.info('Reports loaded', { count: rows.length })
+      } catch (err) {
+        logger.warn('Could not load reports from API', { error: String(err) })
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
 
-  const handleMapClick = (lat: number, lng: number) => {
+  const filteredReports = reports.filter((r) => r.season === season)
+  const markers = filteredReports.map((r) => ({
+    id: r.id,
+    lat: r.lat,
+    lng: r.lng,
+    species: r.species,
+  }))
+
+  const handleMapClick = useCallback((lat: number, lng: number) => {
     logger.info('Map clicked', { lat, lng })
     setPendingLocation({ lat, lng })
     setShowForm(true)
-  }
+  }, [])
 
-  const handleReportSubmit = (reportData: any) => {
-    const newReport: Report = {
-      id: crypto.randomUUID(),
-      ...reportData,
-    }
-    setReports(prev => [...prev, newReport])
-    logger.info('Report added locally', { id: newReport.id, species: newReport.species })
+  const handleReportSubmit = (reportData: Record<string, unknown>) => {
+    const newReport = normalizeReport(reportData)
+    setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)])
+    logger.info('Report added', { id: newReport.id, species: newReport.species })
   }
 
   return (
@@ -79,7 +88,7 @@ export default function App() {
           </div>
 
           <div className="rounded-3xl overflow-hidden border border-white/10 bg-black" style={{ height: '620px' }}>
-            <LacEdjaMap onMapClick={handleMapClick} />
+            <LacEdjaMap onMapClick={handleMapClick} markers={markers} />
           </div>
           <div className="text-center text-xs text-white/40 mt-3">Click anywhere on the water to log a catch</div>
         </div>

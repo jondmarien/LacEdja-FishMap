@@ -13,7 +13,13 @@ export async function GET() {
 }
 
 export async function POST(request: Request) {
-  const body = await request.json()
+  let body: Record<string, any>
+  try {
+    body = await request.json()
+  } catch {
+    return Response.json({ error: 'Invalid JSON body' }, { status: 400 })
+  }
+
   const {
     date,
     time,
@@ -29,7 +35,22 @@ export async function POST(request: Request) {
     season,
   } = body
 
-  const editToken = Math.random().toString(36).slice(2, 10)
+  // Minimal validation — the DB requires date/species and finite coordinates.
+  if (
+    typeof species !== 'string' ||
+    species.trim() === '' ||
+    typeof date !== 'string' ||
+    !Number.isFinite(Number(lat)) ||
+    !Number.isFinite(Number(lng))
+  ) {
+    logger.api('warn', 'Rejected invalid report payload')
+    return Response.json(
+      { error: 'species, date, lat and lng are required' },
+      { status: 400 },
+    )
+  }
+
+  const editToken = crypto.randomUUID()
 
   try {
     const { rows } = await sql`

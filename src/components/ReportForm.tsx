@@ -67,11 +67,14 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(reportPayload),
       })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const savedReport = await res.json()
       logger.info('Report created', { id: savedReport.id, species: savedReport.species })
       onSubmit(savedReport)
     } catch (err) {
-      logger.error('Report submission failed', { error: String(err) })
+      // API unavailable (e.g. local dev without a DB) — keep the catch locally
+      // so the user never loses their entry.
+      logger.error('Report submission failed, keeping locally', { error: String(err) })
       onSubmit({ ...reportPayload, id: crypto.randomUUID() })
     }
 

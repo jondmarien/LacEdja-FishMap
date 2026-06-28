@@ -20,5 +20,12 @@ CREATE TABLE IF NOT EXISTS reports (
   season_tag TEXT
 );
 
+-- Filter by season, list newest-first (matches the API queries).
 CREATE INDEX IF NOT EXISTS idx_reports_season ON reports(season_tag);
-CREATE INDEX IF NOT EXISTS idx_reports_location ON reports USING GIST (ll_to_earth(lat, lng));
+CREATE INDEX IF NOT EXISTS idx_reports_created_at ON reports(created_at DESC);
+
+-- NOTE: A spatial GIST index on ll_to_earth(lat, lng) was removed: it requires
+-- the `cube` + `earthdistance` extensions (never enabled, so the migration
+-- failed) and no query performs radius/proximity search. Re-add it together
+-- with `CREATE EXTENSION cube; CREATE EXTENSION earthdistance;` if/when
+-- proximity queries are introduced.

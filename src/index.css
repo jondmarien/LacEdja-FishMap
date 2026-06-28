@@ -46,6 +46,24 @@ body {
   min-height: 100svh;
 }
 
+/* Catch markers on the map */
+.edja-marker {
+  width: 18px;
+  height: 18px;
+  border-radius: 9999px;
+  background: var(--color-reed-500);
+  border: 2.5px solid #fff;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transition:
+    transform 0.15s ease,
+    background-color 0.15s ease;
+}
+.edja-marker:hover {
+  transform: scale(1.25);
+  background: var(--color-lake-400);
+}
+
 /* Respect reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {
   *,
