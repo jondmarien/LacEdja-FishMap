@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { upload } from '@vercel/blob/client'
+import { Crosshair, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
 
@@ -8,8 +9,12 @@ interface ReportFormProps {
   lng: number
   season: Season
   onClose: () => void
-  onSubmit: (report: any) => void
+  onSubmit: (report: Record<string, unknown>) => void
 }
+
+const inputClass =
+  'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-lake-500 focus:outline-none focus:ring-2 focus:ring-lake-500/25'
+const labelClass = 'mb-1 block text-xs font-medium text-slate-500'
 
 export default function ReportForm({ lat, lng, season, onClose, onSubmit }: ReportFormProps) {
   const [form, setForm] = useState({
@@ -114,19 +119,32 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
   }
 
   return (
-    <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50 p-4">
-      <div className="bg-[#111] border border-white/10 rounded-2xl w-full max-w-md p-6">
-        <div className="flex justify-between items-center mb-6">
-          <h3 className="text-xl font-semibold">New Catch Report</h3>
-          <button onClick={onClose} className="text-white/50 hover:text-white">✕</button>
+    <div
+      className="fixed inset-0 z-50 flex items-end justify-center bg-slate-900/40 p-0 backdrop-blur-sm sm:items-center sm:p-4"
+      onClick={onClose}
+    >
+      <div
+        className="max-h-[92dvh] w-full max-w-md overflow-y-auto rounded-t-3xl border border-lake-100 bg-white p-6 shadow-2xl sm:rounded-3xl"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="mb-5 flex items-center justify-between">
+          <h3 className="text-lg font-semibold text-slate-900">New catch</h3>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="rounded-full p-1.5 text-slate-400 transition-colors hover:bg-slate-100 hover:text-slate-600"
+          >
+            <X size={18} weight="bold" />
+          </button>
         </div>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="rounded-lg border border-white/10 bg-white/5 p-3">
+          <div className="rounded-xl border border-lake-100 bg-lake-50/60 p-3">
             <div className="flex items-center justify-between gap-3">
-              <div>
-                <div className="text-xs text-white/50">Location</div>
-                <div className="font-mono text-sm tabular-nums">
+              <div className="min-w-0">
+                <div className="text-xs font-medium text-slate-500">Spot</div>
+                <div className="font-mono text-sm tabular-nums text-slate-700">
                   {coords.lat.toFixed(5)}, {coords.lng.toFixed(5)}
                 </div>
               </div>
@@ -134,67 +152,165 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
                 type="button"
                 onClick={useMyLocation}
                 disabled={locating}
-                className="shrink-0 rounded-full border border-white/20 px-3 py-1.5 text-xs hover:bg-white/10 disabled:opacity-60"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-lake-200 bg-white px-3 py-1.5 text-xs font-medium text-lake-700 transition-colors hover:bg-lake-50 disabled:opacity-60"
               >
-                {locating ? 'Locating…' : '📍 Use my location'}
+                <Crosshair size={14} weight="bold" />
+                {locating ? 'Locating…' : 'Use my location'}
               </button>
             </div>
-            {locError && <div className="mt-2 text-xs text-amber-400">{locError}</div>}
+            {locError && <div className="mt-2 text-xs text-amber-600">{locError}</div>}
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label htmlFor="date" className="text-xs text-white/50">Date</label>
-              <input id="date" type="date" name="date" value={form.date} onChange={(e) => setForm({ ...form, date: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+              <label htmlFor="date" className={labelClass}>
+                Date
+              </label>
+              <input
+                id="date"
+                type="date"
+                name="date"
+                value={form.date}
+                onChange={(e) => setForm({ ...form, date: e.target.value })}
+                className={inputClass}
+                required
+              />
             </div>
             <div>
-              <label htmlFor="time" className="text-xs text-white/50">Time</label>
-              <input id="time" type="time" name="time" value={form.time} onChange={(e) => setForm({ ...form, time: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+              <label htmlFor="time" className={labelClass}>
+                Time
+              </label>
+              <input
+                id="time"
+                type="time"
+                name="time"
+                value={form.time}
+                onChange={(e) => setForm({ ...form, time: e.target.value })}
+                className={inputClass}
+              />
             </div>
           </div>
 
           <div>
-            <label htmlFor="species" className="text-xs text-white/50">Species</label>
-            <input id="species" type="text" name="species" value={form.species} onChange={(e) => setForm({ ...form, species: e.target.value })} placeholder="Largemouth bass, Lake trout..." className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" required />
+            <label htmlFor="species" className={labelClass}>
+              Species
+            </label>
+            <input
+              id="species"
+              type="text"
+              name="species"
+              value={form.species}
+              onChange={(e) => setForm({ ...form, species: e.target.value })}
+              placeholder="Largemouth bass, Lake trout..."
+              className={inputClass}
+              required
+            />
           </div>
 
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-3 gap-3">
             <div>
-              <label htmlFor="length" className="text-xs text-white/50">Length (cm)</label>
-              <input id="length" type="number" name="length_cm" value={form.length_cm} onChange={(e) => setForm({ ...form, length_cm: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+              <label htmlFor="length" className={labelClass}>
+                Length (cm)
+              </label>
+              <input
+                id="length"
+                type="number"
+                name="length_cm"
+                value={form.length_cm}
+                onChange={(e) => setForm({ ...form, length_cm: e.target.value })}
+                className={inputClass}
+              />
             </div>
             <div>
-              <label htmlFor="weight" className="text-xs text-white/50">Weight (kg)</label>
-              <input id="weight" type="number" step="0.1" name="weight_kg" value={form.weight_kg} onChange={(e) => setForm({ ...form, weight_kg: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+              <label htmlFor="weight" className={labelClass}>
+                Weight (kg)
+              </label>
+              <input
+                id="weight"
+                type="number"
+                step="0.1"
+                name="weight_kg"
+                value={form.weight_kg}
+                onChange={(e) => setForm({ ...form, weight_kg: e.target.value })}
+                className={inputClass}
+              />
             </div>
             <div>
-              <label htmlFor="count" className="text-xs text-white/50">Count</label>
-              <input id="count" type="number" name="count" value={form.count} onChange={(e) => setForm({ ...form, count: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+              <label htmlFor="count" className={labelClass}>
+                Count
+              </label>
+              <input
+                id="count"
+                type="number"
+                name="count"
+                value={form.count}
+                onChange={(e) => setForm({ ...form, count: e.target.value })}
+                className={inputClass}
+              />
             </div>
           </div>
 
           <div>
-            <label htmlFor="bait" className="text-xs text-white/50">Bait / Lure</label>
-            <input id="bait" type="text" name="bait" value={form.bait} onChange={(e) => setForm({ ...form, bait: e.target.value })} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm" />
+            <label htmlFor="bait" className={labelClass}>
+              Bait / Lure
+            </label>
+            <input
+              id="bait"
+              type="text"
+              name="bait"
+              value={form.bait}
+              onChange={(e) => setForm({ ...form, bait: e.target.value })}
+              className={inputClass}
+            />
           </div>
 
           <div>
-            <label htmlFor="notes" className="text-xs text-white/50">Notes</label>
-            <textarea id="notes" name="notes" value={form.notes} onChange={(e) => setForm({ ...form, notes: e.target.value })} rows={2} className="w-full bg-white/5 border border-white/10 rounded px-3 py-2 text-sm resize-y" />
+            <label htmlFor="notes" className={labelClass}>
+              Notes
+            </label>
+            <textarea
+              id="notes"
+              name="notes"
+              value={form.notes}
+              onChange={(e) => setForm({ ...form, notes: e.target.value })}
+              rows={2}
+              className={`${inputClass} resize-y`}
+            />
           </div>
 
           <div>
-            <label htmlFor="photos" className="text-xs text-white/50">Photos (optional)</label>
-            <input id="photos" type="file" accept="image/*" multiple onChange={(e) => {
-              if (e.target.files) setPhotos(Array.from(e.target.files))
-            }} className="w-full text-sm file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:bg-white/10" />
-            {photos.length > 0 && <div className="text-xs text-white/50 mt-1">{photos.length} photo(s) selected</div>}
+            <label htmlFor="photos" className={labelClass}>
+              Photos (optional)
+            </label>
+            <input
+              id="photos"
+              type="file"
+              accept="image/*"
+              multiple
+              onChange={(e) => {
+                if (e.target.files) setPhotos(Array.from(e.target.files))
+              }}
+              className="w-full text-sm text-slate-500 file:mr-3 file:rounded-full file:border-0 file:bg-lake-50 file:px-4 file:py-2 file:text-sm file:font-medium file:text-lake-700 hover:file:bg-lake-100"
+            />
+            {photos.length > 0 && (
+              <div className="mt-1 text-xs text-slate-500">{photos.length} photo(s) selected</div>
+            )}
           </div>
 
-          <div className="pt-2 flex gap-3">
-            <button type="button" onClick={onClose} className="flex-1 py-2.5 rounded-xl border border-white/20 hover:bg-white/5 text-sm">Cancel</button>
-            <button type="submit" disabled={submitting} className="flex-1 py-2.5 rounded-xl bg-white text-black font-medium text-sm disabled:opacity-60">
-              {submitting ? (uploading ? 'Uploading photos...' : 'Saving...') : 'Save Report'}
+          <div className="flex gap-3 pt-1">
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 rounded-xl border border-slate-200 py-2.5 text-sm font-medium text-slate-600 transition-colors hover:bg-slate-50"
+            >
+              Cancel
+            </button>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="flex-1 rounded-xl bg-lake-600 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-lake-700 active:translate-y-px disabled:opacity-60"
+            >
+              {submitting ? (uploading ? 'Uploading photos…' : 'Saving…') : 'Save catch'}
             </button>
           </div>
         </form>

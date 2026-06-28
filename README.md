@@ -4,14 +4,15 @@ Seasonal, interactive fish map for Lac Edja (Blue Sea, Outaouais, Quebec) with a
 
 ## Features (v0.3)
 
-- Interactive MapLibre map centered on Lac Edja
+- Interactive MapLibre satellite map centered on Lac Edja
 - Season selector (Spring / Summer / Fall / Winter)
 - Click anywhere on the lake to submit a catch report
 - Full report form with species, size, bait, notes, and photo upload
 - Photos stored via Vercel Blob
 - Reports saved to Vercel Postgres (via serverless functions)
-- PWA with offline map tile caching
-- Dark, chrono-inspired terminal aesthetic
+- Device geolocation: log a catch at your GPS position or center the map on you
+- PWA with offline satellite-tile caching
+- Light, calm lake/nature aesthetic, fully responsive on mobile and desktop
 
 ## Tech Stack
 

@@ -18,20 +18,29 @@ export default function SeasonSelector({ value, onChange }: SeasonSelectorProps)
   }
 
   return (
-    <div className="inline-flex rounded-full border border-white/20 p-1 bg-white/5">
-      {seasons.map((season) => (
-        <button
-          key={season}
-          onClick={() => handleChange(season)}
-          className={`px-5 py-1.5 text-sm rounded-full transition-all ${
-            value === season
-              ? 'bg-white text-black'
-              : 'hover:bg-white/10 text-white/80'
-          }`}
-        >
-          {season}
-        </button>
-      ))}
+    <div
+      role="tablist"
+      aria-label="Season"
+      className="inline-flex w-full gap-1 rounded-full border border-lake-100 bg-white p-1 shadow-sm sm:w-auto"
+    >
+      {seasons.map((season) => {
+        const active = value === season
+        return (
+          <button
+            key={season}
+            role="tab"
+            aria-selected={active}
+            onClick={() => handleChange(season)}
+            className={`flex-1 rounded-full px-3 py-1.5 text-sm font-medium transition-colors sm:flex-none sm:px-4 ${
+              active
+                ? 'bg-lake-600 text-white shadow-sm'
+                : 'text-slate-500 hover:bg-lake-50 hover:text-lake-700'
+            }`}
+          >
+            {season}
+          </button>
+        )
+      })}
     </div>
   )
 }

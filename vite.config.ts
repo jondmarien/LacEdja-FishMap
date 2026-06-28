@@ -9,30 +9,21 @@ export default defineConfig({
     tailwindcss(),
     VitePWA({
       registerType: 'autoUpdate',
-      includeAssets: ['favicon.svg', 'apple-touch-icon.png'],
+      injectRegister: false, // we call registerSW() ourselves in main.tsx
+      includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Lac Edja Fish Map',
         short_name: 'Lac Edja',
-        description: 'Seasonal catch map for Lac Edja, Quebec.',
+        description: 'Seasonal catch map for Lac Edja, Québec.',
         theme_color: '#0c4a6e',
-        background_color: '#f0f7f9',
+        background_color: '#eef6f8',
         display: 'standalone',
         icons: [
           {
-            src: '/icon-192.png',
-            sizes: '192x192',
-            type: 'image/png',
-          },
-          {
-            src: '/icon-512.png',
-            sizes: '512x512',
-            type: 'image/png',
-          },
-          {
-            src: '/icon-512-maskable.png',
-            sizes: '512x512',
-            type: 'image/png',
-            purpose: 'maskable',
+            src: '/favicon.svg',
+            sizes: 'any',
+            type: 'image/svg+xml',
+            purpose: 'any maskable',
           },
         ],
       },
