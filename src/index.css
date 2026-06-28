@@ -61,22 +61,57 @@ body {
   animation: edja-rise 0.55s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
-/* Catch markers on the map */
-.edja-marker {
-  width: 18px;
-  height: 18px;
-  border-radius: 9999px;
-  background: var(--color-reed-500);
-  border: 2.5px solid #fff;
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+/* Catch pins on the map */
+.edja-pin {
   cursor: pointer;
-  transition:
-    transform 0.15s ease,
-    background-color 0.15s ease;
+  line-height: 0;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, 0.45));
 }
-.edja-marker:hover {
-  transform: scale(1.25);
-  background: var(--color-lake-400);
+.edja-pin svg {
+  display: block;
+  transition: transform 0.15s cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: bottom center;
+}
+.edja-pin:hover svg {
+  transform: scale(1.18);
+}
+
+/* Catch popup */
+.edja-popup-wrap .maplibregl-popup-content {
+  padding: 10px 12px;
+  border-radius: 12px;
+  box-shadow: 0 8px 24px rgba(8, 51, 68, 0.22);
+  border: 1px solid var(--color-lake-100);
+}
+.edja-popup-wrap .maplibregl-popup-tip {
+  border-top-color: #fff;
+}
+.edja-popup-title {
+  font-weight: 600;
+  font-size: 14px;
+  color: #0f2733;
+}
+.edja-popup-meta {
+  font-size: 12px;
+  color: #64748b;
+  margin-top: 1px;
+}
+.edja-popup-stats {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-lake-700);
+  margin-top: 4px;
+}
+.edja-popup-bait {
+  font-size: 12px;
+  font-style: italic;
+  color: #64748b;
+  margin-top: 2px;
+}
+.edja-popup-by {
+  font-size: 11px;
+  color: #94a3b8;
+  margin-top: 4px;
 }
 
 /* Respect reduced-motion preferences */

@@ -3,6 +3,7 @@ import { upload } from '@vercel/blob/client'
 import { Crosshair, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
+import type { Report } from '../lib/reports'
 
 interface ReportFormProps {
   lat: number
@@ -10,27 +11,52 @@ interface ReportFormProps {
   season: Season
   onClose: () => void
   onSubmit: (report: Record<string, unknown>) => void
+  /** When present, the form edits this catch (PATCH) instead of creating one. */
+  report?: Report
+  editToken?: string
 }
 
+const REPORTER_KEY = 'edja_reporter'
 const inputClass =
   'w-full rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm text-slate-900 placeholder:text-slate-400 transition-colors focus:border-lake-500 focus:outline-none focus:ring-2 focus:ring-lake-500/25'
 const labelClass = 'mb-1 block text-xs font-medium text-slate-500'
 
-export default function ReportForm({ lat, lng, season, onClose, onSubmit }: ReportFormProps) {
+function readSavedReporter(): string {
+  try {
+    return localStorage.getItem(REPORTER_KEY) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+export default function ReportForm({
+  lat,
+  lng,
+  season,
+  onClose,
+  onSubmit,
+  report,
+  editToken,
+}: ReportFormProps) {
+  const isEditing = Boolean(report && editToken)
   const [form, setForm] = useState({
-    date: new Date().toISOString().split('T')[0],
-    time: new Date().toTimeString().slice(0, 5),
-    species: '',
-    length_cm: '',
-    weight_kg: '',
-    count: '1',
-    notes: '',
-    bait: '',
+    date: report?.date ?? new Date().toISOString().split('T')[0],
+    time: report?.time ?? new Date().toTimeString().slice(0, 5),
+    species: report?.species ?? '',
+    length_cm: report?.length_cm != null ? String(report.length_cm) : '',
+    weight_kg: report?.weight_kg != null ? String(report.weight_kg) : '',
+    count: report?.count != null ? String(report.count) : '1',
+    notes: report?.notes ?? '',
+    bait: report?.bait ?? '',
+    reporter: report?.reporter ?? readSavedReporter(),
   })
   const [photos, setPhotos] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
-  const [coords, setCoords] = useState({ lat, lng })
+  const [coords, setCoords] = useState({
+    lat: report?.lat ?? lat,
+    lng: report?.lng ?? lng,
+  })
   const [locating, setLocating] = useState(false)
   const [locError, setLocError] = useState<string | null>(null)
 
@@ -66,7 +92,14 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
     e.preventDefault()
     setSubmitting(true)
 
-    let photoUrls: string[] = []
+    // Remember the reporter name on this device for next time.
+    try {
+      if (form.reporter.trim()) localStorage.setItem(REPORTER_KEY, form.reporter.trim())
+    } catch {
+      // ignore storage failures (private mode, etc.)
+    }
+
+    let photoUrls: string[] = report?.photo_urls ? [...report.photo_urls] : []
 
     if (photos.length > 0) {
       setUploading(true)
@@ -79,7 +112,7 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
           logger.info('Photo uploaded', { filename: file.name })
           return blob.url
         })
-        photoUrls = await Promise.all(uploadPromises)
+        photoUrls = [...photoUrls, ...(await Promise.all(uploadPromises))]
       } catch (err) {
         logger.error('Photo upload failed', { error: String(err) })
       }
@@ -88,6 +121,7 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
 
     const reportPayload = {
       ...form,
+      reporter: form.reporter.trim() || null,
       lat: coords.lat,
       lng: coords.lng,
       season,
@@ -98,20 +132,28 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
     }
 
     try {
-      const res = await fetch('/api/reports', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const url =
+        isEditing && report ? `/api/reports?id=${encodeURIComponent(report.id)}` : '/api/reports'
+      const res = await fetch(url, {
+        method: isEditing ? 'PATCH' : 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...(isEditing && editToken ? { 'x-edit-token': editToken } : {}),
+        },
         body: JSON.stringify(reportPayload),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
       const savedReport = await res.json()
-      logger.info('Report created', { id: savedReport.id, species: savedReport.species })
+      logger.info(isEditing ? 'Report updated' : 'Report created', {
+        id: savedReport.id,
+        species: savedReport.species,
+      })
       onSubmit(savedReport)
     } catch (err) {
       // API unavailable (e.g. local dev without a DB) — keep the catch locally
       // so the user never loses their entry.
       logger.error('Report submission failed, keeping locally', { error: String(err) })
-      onSubmit({ ...reportPayload, id: crypto.randomUUID() })
+      onSubmit({ ...reportPayload, id: report?.id ?? crypto.randomUUID() })
     }
 
     setSubmitting(false)
@@ -128,7 +170,9 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
         onClick={(e) => e.stopPropagation()}
       >
         <div className="mb-5 flex items-center justify-between">
-          <h3 className="text-lg font-semibold text-slate-900">New catch</h3>
+          <h3 className="text-lg font-semibold text-slate-900">
+            {isEditing ? 'Edit catch' : 'New catch'}
+          </h3>
           <button
             type="button"
             onClick={onClose}
@@ -265,6 +309,22 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
           </div>
 
           <div>
+            <label htmlFor="reporter" className={labelClass}>
+              Your name or initials
+            </label>
+            <input
+              id="reporter"
+              type="text"
+              name="reporter"
+              value={form.reporter}
+              onChange={(e) => setForm({ ...form, reporter: e.target.value })}
+              placeholder="e.g. Jon or JM"
+              maxLength={40}
+              className={inputClass}
+            />
+          </div>
+
+          <div>
             <label htmlFor="notes" className={labelClass}>
               Notes
             </label>
@@ -310,7 +370,13 @@ export default function ReportForm({ lat, lng, season, onClose, onSubmit }: Repo
               disabled={submitting}
               className="flex-1 rounded-xl bg-lake-600 py-2.5 text-sm font-semibold text-white shadow-sm transition-all hover:bg-lake-700 active:translate-y-px disabled:opacity-60"
             >
-              {submitting ? (uploading ? 'Uploading photos…' : 'Saving…') : 'Save catch'}
+              {submitting
+                ? uploading
+                  ? 'Uploading photos…'
+                  : 'Saving…'
+                : isEditing
+                  ? 'Save changes'
+                  : 'Save catch'}
             </button>
           </div>
         </form>

@@ -19,6 +19,7 @@ export interface Report {
   count?: number
   bait?: string
   notes?: string
+  reporter?: string
   photo_urls?: string[]
 }
 
@@ -50,6 +51,7 @@ export function normalizeReport(row: Record<string, unknown>): Report {
     count: toNumber(row.count),
     bait: row.bait ? String(row.bait) : undefined,
     notes: row.notes ? String(row.notes) : undefined,
+    reporter: row.reporter ? String(row.reporter) : undefined,
     photo_urls: Array.isArray(row.photo_urls) ? (row.photo_urls as string[]) : [],
   }
 }

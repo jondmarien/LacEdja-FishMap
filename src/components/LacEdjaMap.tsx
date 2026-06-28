@@ -8,6 +8,46 @@ export interface MapMarker {
   lat: number
   lng: number
   species: string
+  date?: string
+  time?: string
+  length_cm?: number
+  weight_kg?: number
+  count?: number
+  bait?: string
+  reporter?: string
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+// A teardrop map pin (tip at bottom-center) with a fish glyph.
+const PIN_SVG = `
+<svg width="30" height="40" viewBox="0 0 24 32" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+  <path d="M12 0C5.37 0 0 5.37 0 12c0 9 12 20 12 20s12-11 12-20C24 5.37 18.63 0 12 0Z" fill="#16a34a" stroke="#ffffff" stroke-width="2"/>
+  <path d="M16.5 11.8c-2.6-2.9-6.7-2.9-8.9-.6.7.6.7 1.7 0 2.3 2.2 2.3 6.3 2.3 8.9-.6l1.6 1.4v-3.9l-1.6 1.4Z" fill="#ffffff"/>
+</svg>`
+
+function popupHtml(marker: MapMarker): string {
+  const stats: string[] = []
+  if (marker.length_cm) stats.push(`${marker.length_cm} cm`)
+  if (marker.weight_kg) stats.push(`${marker.weight_kg} kg`)
+  if (marker.count && marker.count > 1) stats.push(`${marker.count} fish`)
+  const when = [marker.date, marker.time].filter(Boolean).join(' · ')
+
+  return `
+    <div class="edja-popup">
+      <div class="edja-popup-title">${escapeHtml(marker.species || 'Catch')}</div>
+      ${when ? `<div class="edja-popup-meta">${escapeHtml(when)}</div>` : ''}
+      ${stats.length ? `<div class="edja-popup-stats">${escapeHtml(stats.join(' · '))}</div>` : ''}
+      ${marker.bait ? `<div class="edja-popup-bait">on ${escapeHtml(marker.bait)}</div>` : ''}
+      ${marker.reporter ? `<div class="edja-popup-by">by ${escapeHtml(marker.reporter)}</div>` : ''}
+    </div>`
 }
 
 interface LacEdjaMapProps {
@@ -106,31 +146,52 @@ export default function LacEdjaMap({
     // handler is read through a ref, so the map is never rebuilt on re-render.
   }, [center, zoom])
 
-  // Sync markers whenever the report list changes.
+  // Sync markers whenever the report list changes, and keep catches in frame.
   useEffect(() => {
-    if (!map.current) return
+    const m = map.current
+    if (!m) return
 
-    markerRefs.current.forEach((m) => m.remove())
+    markerRefs.current.forEach((marker) => marker.remove())
     markerRefs.current = []
 
-    for (const marker of markers) {
-      if (!Number.isFinite(marker.lat) || !Number.isFinite(marker.lng)) continue
+    const valid = markers.filter(
+      (mk) => Number.isFinite(mk.lat) && Number.isFinite(mk.lng),
+    )
 
+    for (const marker of valid) {
       const el = document.createElement('div')
-      el.className = 'edja-marker'
-      el.title = marker.species
+      el.className = 'edja-pin'
+      el.innerHTML = PIN_SVG
+      el.setAttribute('role', 'button')
       el.setAttribute('aria-label', `Catch: ${marker.species}`)
 
-      const m = new maplibregl.Marker({ element: el })
-        .setLngLat([marker.lng, marker.lat])
-        .setPopup(
-          new maplibregl.Popup({ offset: 16, closeButton: false }).setText(
-            marker.species || 'Catch',
-          ),
-        )
-        .addTo(map.current)
+      const popup = new maplibregl.Popup({
+        offset: 30,
+        closeButton: false,
+        className: 'edja-popup-wrap',
+      }).setHTML(popupHtml(marker))
 
-      markerRefs.current.push(m)
+      const placed = new maplibregl.Marker({ element: el, anchor: 'bottom' })
+        .setLngLat([marker.lng, marker.lat])
+        .setPopup(popup)
+        .addTo(m)
+
+      // Open the popup on hover (desktop); click still toggles it (mobile).
+      el.addEventListener('mouseenter', () => placed.togglePopup())
+      el.addEventListener('mouseleave', () => {
+        if (popup.isOpen()) popup.remove()
+      })
+
+      markerRefs.current.push(placed)
+    }
+
+    // Fit the view to the catches so they are always visible.
+    if (valid.length === 1) {
+      m.easeTo({ center: [valid[0].lng, valid[0].lat], zoom: Math.max(m.getZoom(), 13), duration: 600 })
+    } else if (valid.length > 1) {
+      const bounds = new maplibregl.LngLatBounds()
+      valid.forEach((mk) => bounds.extend([mk.lng, mk.lat]))
+      m.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 600 })
     }
   }, [markers])
 

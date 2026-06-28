@@ -1,20 +1,42 @@
-import { useCallback, useEffect, useState } from 'react'
+import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { Analytics } from '@vercel/analytics/react'
-import { Camera, Fish, MapPin, Plus, Ruler } from '@phosphor-icons/react'
-import LacEdjaMap from './components/LacEdjaMap'
+import { Camera, Fish, MapPin, PencilSimple, Plus, Ruler, Trash } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
 import Logo from './components/Logo'
 import { normalizeReport, type Report } from './lib/reports'
 import { logger } from './lib/logger'
 
+// MapLibre is ~1 MB; load it on demand so the rest of the page paints first.
+const LacEdjaMap = lazy(() => import('./components/LacEdjaMap'))
+
 const LAKE_CENTER = { lat: 46.18, lng: -76.01 }
+const TOKENS_KEY = 'edja_tokens'
+
+function readTokens(): Record<string, string> {
+  try {
+    return JSON.parse(localStorage.getItem(TOKENS_KEY) ?? '{}')
+  } catch {
+    return {}
+  }
+}
+
+function writeTokens(tokens: Record<string, string>) {
+  try {
+    localStorage.setItem(TOKENS_KEY, JSON.stringify(tokens))
+  } catch {
+    // ignore storage failures
+  }
+}
 
 export default function App() {
   const [season, setSeason] = useState<Season>('Summer')
   const [reports, setReports] = useState<Report[]>([])
   const [showForm, setShowForm] = useState(false)
   const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [editing, setEditing] = useState<{ report: Report; token: string } | null>(null)
+  // edit_tokens for catches created on this device (only these can edit/delete).
+  const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
 
   // Load existing catches from the API on first mount.
   useEffect(() => {
@@ -36,29 +58,92 @@ export default function App() {
     }
   }, [])
 
-  const filteredReports = reports.filter((r) => r.season === season)
-  const markers = filteredReports.map((r) => ({
-    id: r.id,
-    lat: r.lat,
-    lng: r.lng,
-    species: r.species,
-  }))
+  const filteredReports = useMemo(
+    () => reports.filter((r) => r.season === season),
+    [reports, season],
+  )
+
+  const markers = useMemo(
+    () =>
+      filteredReports.map((r) => ({
+        id: r.id,
+        lat: r.lat,
+        lng: r.lng,
+        species: r.species,
+        date: r.date,
+        time: r.time,
+        length_cm: r.length_cm,
+        weight_kg: r.weight_kg,
+        count: r.count,
+        bait: r.bait,
+        reporter: r.reporter,
+      })),
+    [filteredReports],
+  )
 
   const handleMapClick = useCallback((lat: number, lng: number) => {
     logger.info('Map clicked', { lat, lng })
+    setEditing(null)
     setPendingLocation({ lat, lng })
     setShowForm(true)
   }, [])
 
   const handleAddCatch = () => {
+    setEditing(null)
     setPendingLocation(LAKE_CENTER)
     setShowForm(true)
   }
 
   const handleReportSubmit = (reportData: Record<string, unknown>) => {
     const newReport = normalizeReport(reportData)
+    // If the API returned an edit_token, remember it so this device can
+    // edit/delete the catch later.
+    const token = typeof reportData.edit_token === 'string' ? reportData.edit_token : undefined
+    if (token) {
+      const next = { ...tokens, [newReport.id]: token }
+      setTokens(next)
+      writeTokens(next)
+    }
     setReports((prev) => [newReport, ...prev.filter((r) => r.id !== newReport.id)])
-    logger.info('Report added', { id: newReport.id, species: newReport.species })
+    logger.info('Report saved', { id: newReport.id, species: newReport.species })
+  }
+
+  const handleEdit = (report: Report) => {
+    const token = tokens[report.id]
+    if (!token) return
+    setShowForm(false)
+    setEditing({ report, token })
+  }
+
+  const handleDelete = async (report: Report) => {
+    const token = tokens[report.id]
+    if (!token) return
+    if (!window.confirm(`Delete the ${report.species || 'catch'} report? This cannot be undone.`)) {
+      return
+    }
+    try {
+      const res = await fetch(`/api/reports?id=${encodeURIComponent(report.id)}`, {
+        method: 'DELETE',
+        headers: { 'x-edit-token': token },
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      logger.info('Report deleted', { id: report.id })
+    } catch (err) {
+      logger.error('Delete failed', { error: String(err) })
+      window.alert('Could not delete the catch. Please try again.')
+      return
+    }
+    setReports((prev) => prev.filter((r) => r.id !== report.id))
+    const next = { ...tokens }
+    delete next[report.id]
+    setTokens(next)
+    writeTokens(next)
+  }
+
+  const closeForm = () => {
+    setShowForm(false)
+    setPendingLocation(null)
+    setEditing(null)
   }
 
   return (
@@ -117,7 +202,15 @@ export default function App() {
 
           <div className="overflow-hidden rounded-3xl border border-lake-100 bg-lake-950 shadow-lg shadow-lake-900/10">
             <div className="h-[58vh] min-h-[360px] w-full sm:h-[520px] lg:h-[600px]">
-              <LacEdjaMap onMapClick={handleMapClick} markers={markers} />
+              <Suspense
+                fallback={
+                  <div className="flex h-full w-full items-center justify-center text-sm text-lake-100/70">
+                    Loading map…
+                  </div>
+                }
+              >
+                <LacEdjaMap onMapClick={handleMapClick} markers={markers} />
+              </Suspense>
             </div>
           </div>
           <p className="mt-3 text-center text-sm text-slate-500">
@@ -138,67 +231,96 @@ export default function App() {
 
           {filteredReports.length > 0 ? (
             <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {filteredReports.map((report, i) => (
-                <article
-                  key={report.id}
-                  className="animate-rise rounded-2xl border border-lake-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md"
-                  style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <h3 className="truncate text-lg font-semibold text-slate-900">
-                        {report.species || 'Unknown catch'}
-                      </h3>
-                      <div className="mt-0.5 text-sm text-slate-500">
-                        {report.date}
-                        {report.time ? ` · ${report.time}` : ''}
-                      </div>
-                    </div>
-                    {report.length_cm ? (
-                      <div className="shrink-0 rounded-xl bg-lake-50 px-3 py-1.5 text-right">
-                        <div className="text-2xl font-semibold tabular-nums leading-none text-lake-700">
-                          {report.length_cm}
-                        </div>
-                        <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-medium uppercase tracking-wide text-lake-600/70">
-                          <Ruler size={11} weight="bold" /> cm
+              {filteredReports.map((report, i) => {
+                const canManage = Boolean(tokens[report.id])
+                return (
+                  <article
+                    key={report.id}
+                    className="animate-rise flex flex-col rounded-2xl border border-lake-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md"
+                    style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h3 className="truncate text-lg font-semibold text-slate-900">
+                          {report.species || 'Unknown catch'}
+                        </h3>
+                        <div className="mt-0.5 text-sm text-slate-500">
+                          {report.date}
+                          {report.time ? ` · ${report.time}` : ''}
                         </div>
                       </div>
-                    ) : null}
-                  </div>
-
-                  {(report.weight_kg || (report.count ?? 0) > 1) && (
-                    <div className="mt-3 flex flex-wrap gap-2">
-                      {report.weight_kg ? (
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                          {report.weight_kg} kg
-                        </span>
-                      ) : null}
-                      {(report.count ?? 0) > 1 ? (
-                        <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
-                          {report.count} fish
-                        </span>
+                      {report.length_cm ? (
+                        <div className="shrink-0 rounded-xl bg-lake-50 px-3 py-1.5 text-right">
+                          <div className="text-2xl font-semibold tabular-nums leading-none text-lake-700">
+                            {report.length_cm}
+                          </div>
+                          <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-medium uppercase tracking-wide text-lake-600/70">
+                            <Ruler size={11} weight="bold" /> cm
+                          </div>
+                        </div>
                       ) : null}
                     </div>
-                  )}
 
-                  {report.bait && (
-                    <div className="mt-3 text-sm italic text-slate-500">on {report.bait}</div>
-                  )}
+                    {(report.weight_kg || (report.count ?? 0) > 1) && (
+                      <div className="mt-3 flex flex-wrap gap-2">
+                        {report.weight_kg ? (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                            {report.weight_kg} kg
+                          </span>
+                        ) : null}
+                        {(report.count ?? 0) > 1 ? (
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                            {report.count} fish
+                          </span>
+                        ) : null}
+                      </div>
+                    )}
 
-                  {report.notes && (
-                    <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">
-                      {report.notes}
-                    </p>
-                  )}
+                    {report.bait && (
+                      <div className="mt-3 text-sm italic text-slate-500">on {report.bait}</div>
+                    )}
 
-                  {report.photo_urls && report.photo_urls.length > 0 ? (
-                    <div className="mt-4 flex items-center gap-1.5 text-xs text-slate-400">
-                      <Camera size={14} />
-                      {report.photo_urls.length} photo{report.photo_urls.length > 1 ? 's' : ''}
+                    {report.notes && (
+                      <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">
+                        {report.notes}
+                      </p>
+                    )}
+
+                    <div className="mt-4 flex items-end justify-between gap-2 pt-1">
+                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                        {report.reporter && (
+                          <span className="font-medium text-slate-500">by {report.reporter}</span>
+                        )}
+                        {report.photo_urls && report.photo_urls.length > 0 ? (
+                          <span className="flex items-center gap-1">
+                            <Camera size={14} />
+                            {report.photo_urls.length}
+                          </span>
+                        ) : null}
+                      </div>
+
+                      {canManage && (
+                        <div className="flex items-center gap-1">
+                          <button
+                            onClick={() => handleEdit(report)}
+                            aria-label="Edit catch"
+                            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-lake-50 hover:text-lake-700"
+                          >
+                            <PencilSimple size={16} />
+                          </button>
+                          <button
+                            onClick={() => handleDelete(report)}
+                            aria-label="Delete catch"
+                            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
+                          >
+                            <Trash size={16} />
+                          </button>
+                        </div>
+                      )}
                     </div>
-                  ) : null}
-                </article>
-              ))}
+                  </article>
+                )
+              })}
             </div>
           ) : (
             <div className="rounded-2xl border border-dashed border-lake-200 bg-white/60 px-6 py-16 text-center">
@@ -223,18 +345,25 @@ export default function App() {
         </div>
       </footer>
 
-      {showForm && pendingLocation && (
+      {editing ? (
+        <ReportForm
+          lat={editing.report.lat}
+          lng={editing.report.lng}
+          season={season}
+          report={editing.report}
+          editToken={editing.token}
+          onClose={closeForm}
+          onSubmit={handleReportSubmit}
+        />
+      ) : showForm && pendingLocation ? (
         <ReportForm
           lat={pendingLocation.lat}
           lng={pendingLocation.lng}
           season={season}
-          onClose={() => {
-            setShowForm(false)
-            setPendingLocation(null)
-          }}
+          onClose={closeForm}
           onSubmit={handleReportSubmit}
         />
-      )}
+      ) : null}
       <Analytics />
     </div>
   )
