@@ -1,6 +1,6 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { Analytics } from '@vercel/analytics/react'
-import { Camera, Fish, MapPin, Plus, Ruler } from '@phosphor-icons/react'
+import { Camera, Fish, MapPin, Mountains, Plus, Ruler } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
 import CatchDetail from './components/CatchDetail'
@@ -41,6 +41,7 @@ export default function App() {
   const [detail, setDetail] = useState<Report | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Report | null>(null)
   const [toast, setToast] = useState<string | null>(null)
+  const [terrain3d, setTerrain3d] = useState(false) // 3D terrain off by default
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
 
@@ -229,7 +230,23 @@ export default function App() {
             <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
               The lake
             </h2>
-            <SeasonSelector value={season} onChange={setSeason} />
+            <div className="flex flex-wrap items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setTerrain3d((v) => !v)}
+                aria-pressed={terrain3d}
+                title="Toggle 3D terrain"
+                className={`inline-flex items-center gap-1.5 rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${
+                  terrain3d
+                    ? 'border-lake-600 bg-lake-600 text-white'
+                    : 'border-lake-100 bg-white text-slate-500 hover:bg-lake-50 hover:text-lake-700 dark:border-white/10 dark:bg-lake-900/60 dark:text-slate-400 dark:hover:bg-white/10'
+                }`}
+              >
+                <Mountains size={15} weight={terrain3d ? 'fill' : 'regular'} />
+                3D
+              </button>
+              <SeasonSelector value={season} onChange={setSeason} />
+            </div>
           </div>
 
           <div className="overflow-hidden rounded-3xl border border-lake-100 bg-lake-950 shadow-lg shadow-lake-900/10 dark:border-white/10">
@@ -245,6 +262,7 @@ export default function App() {
                   onMapClick={handleMapClick}
                   onMarkerClick={handleMarkerClick}
                   markers={markers}
+                  terrain3d={terrain3d}
                 />
               </Suspense>
             </div>

@@ -66,7 +66,13 @@ interface LacEdjaMapProps {
   onMapClick?: (lat: number, lng: number) => void
   onMarkerClick?: (id: string) => void
   markers?: MapMarker[]
+  /** When true, enable 3D terrain (off by default). */
+  terrain3d?: boolean
 }
+
+// Free, no-key global elevation tiles (AWS Open Data, Terrarium encoding).
+const TERRAIN_SOURCE_ID = 'edja-terrarium'
+const TERRAIN_TILES = ['https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png']
 
 // Esri World Imagery — free satellite basemap, no API key required.
 const SATELLITE_STYLE: maplibregl.StyleSpecification = {
@@ -94,10 +100,12 @@ export default function LacEdjaMap({
   onMapClick,
   onMarkerClick,
   markers = [],
+  terrain3d = false,
 }: LacEdjaMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const markerRefs = useRef<maplibregl.Marker[]>([])
+  const terrain3dRef = useRef(terrain3d)
 
   // Keep the latest handlers in refs so the init effect can run once without
   // tearing down and rebuilding the map on every parent re-render.
@@ -107,6 +115,29 @@ export default function LacEdjaMap({
     onMapClickRef.current = onMapClick
     onMarkerClickRef.current = onMarkerClick
   }, [onMapClick, onMarkerClick])
+
+  // Enable/disable 3D terrain. Tiles are only fetched while terrain is on.
+  const applyTerrain = (on: boolean) => {
+    const m = map.current
+    if (!m || !m.isStyleLoaded() || !m.getSource(TERRAIN_SOURCE_ID)) return
+    if (on) {
+      m.setTerrain({ source: TERRAIN_SOURCE_ID, exaggeration: 1.5 })
+      m.setSky({
+        'atmosphere-blend': ['interpolate', ['linear'], ['zoom'], 0, 1, 8, 0],
+      })
+      m.easeTo({ pitch: 65, duration: 800 })
+    } else {
+      m.setTerrain(null)
+      m.easeTo({ pitch: 0, duration: 600 })
+    }
+  }
+
+  useEffect(() => {
+    terrain3dRef.current = terrain3d
+    applyTerrain(terrain3d)
+    // applyTerrain only reads refs/constants; safe to omit from deps.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [terrain3d])
 
   // Initialize the map exactly once.
   useEffect(() => {
@@ -118,11 +149,25 @@ export default function LacEdjaMap({
         style: SATELLITE_STYLE,
         center,
         zoom,
+        maxPitch: 85,
         attributionControl: { compact: true },
       })
 
       map.current.on('load', () => {
         logger.info('Map loaded successfully')
+        // Add the elevation source up front (no tiles fetched until terrain is
+        // enabled), then apply the current 3D state.
+        if (!map.current!.getSource(TERRAIN_SOURCE_ID)) {
+          map.current!.addSource(TERRAIN_SOURCE_ID, {
+            type: 'raster-dem',
+            tiles: TERRAIN_TILES,
+            tileSize: 256,
+            encoding: 'terrarium',
+            maxzoom: 15,
+            attribution: 'Elevation © AWS Open Data Terrain Tiles',
+          })
+        }
+        applyTerrain(terrain3dRef.current)
       })
 
       map.current.on('error', (e) => {
