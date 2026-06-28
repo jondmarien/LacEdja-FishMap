@@ -16,7 +16,7 @@ export async function POST(request: Request) {
         // uploads don't collide/overwrite.
         addRandomSuffix: true,
         // Generous cap for full-resolution phone photos.
-        maximumSizeInBytes: 25 * 1024 * 1024,
+        maximumSizeInBytes: 40 * 1024 * 1024,
       }),
       onUploadCompleted: async ({ blob }) => {
         logger.api('info', 'Photo uploaded', { url: blob.url })

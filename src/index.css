@@ -160,7 +160,37 @@ body {
   backdrop-filter: blur(2px);
 }
 
+/* Confirm dialog (native Popover API) */
+.edja-confirm {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  width: min(380px, 92vw);
+  height: fit-content;
+  padding: 20px;
+  border: 1px solid var(--color-lake-100);
+  border-radius: 18px;
+  box-shadow: 0 24px 60px rgba(8, 51, 68, 0.28);
+  background: #fff;
+  color: #0f2733;
+}
+.edja-confirm::backdrop {
+  background: rgba(8, 20, 26, 0.55);
+  backdrop-filter: blur(2px);
+}
+@media (prefers-reduced-motion: no-preference) {
+  .edja-confirm:popover-open {
+    animation: edja-rise 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
 /* ---- Dark variants for CSS-driven map UI + popover ---- */
+[data-theme='dark'] .edja-confirm {
+  background: #0f2430;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #dbe7ec;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
 [data-theme='dark'] .edja-detail {
   background: #0f2430;
   border-color: rgba(255, 255, 255, 0.08);

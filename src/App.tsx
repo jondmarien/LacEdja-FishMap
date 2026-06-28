@@ -4,6 +4,7 @@ import { Camera, Fish, MapPin, Plus, Ruler } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
 import CatchDetail from './components/CatchDetail'
+import ConfirmDialog from './components/ConfirmDialog'
 import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
 import { normalizeReport, type Report } from './lib/reports'
@@ -38,6 +39,8 @@ export default function App() {
   const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [editing, setEditing] = useState<{ report: Report; token: string } | null>(null)
   const [detail, setDetail] = useState<Report | null>(null)
+  const [confirmDelete, setConfirmDelete] = useState<Report | null>(null)
+  const [toast, setToast] = useState<string | null>(null)
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
 
@@ -60,6 +63,12 @@ export default function App() {
       cancelled = true
     }
   }, [])
+
+  useEffect(() => {
+    if (!toast) return
+    const t = setTimeout(() => setToast(null), 4000)
+    return () => clearTimeout(t)
+  }, [toast])
 
   const filteredReports = useMemo(
     () => reports.filter((r) => r.season === season),
@@ -126,12 +135,14 @@ export default function App() {
     setEditing({ report, token })
   }
 
-  const handleDelete = async (report: Report) => {
+  const handleDelete = (report: Report) => {
+    if (!tokens[report.id]) return
+    setConfirmDelete(report)
+  }
+
+  const performDelete = async (report: Report) => {
     const token = tokens[report.id]
     if (!token) return
-    if (!window.confirm(`Delete the ${report.species || 'catch'} report? This cannot be undone.`)) {
-      return
-    }
     try {
       const res = await fetch(`/api/reports?id=${encodeURIComponent(report.id)}`, {
         method: 'DELETE',
@@ -141,7 +152,7 @@ export default function App() {
       logger.info('Report deleted', { id: report.id })
     } catch (err) {
       logger.error('Delete failed', { error: String(err) })
-      window.alert('Could not delete the catch. Please try again.')
+      setToast('Could not delete the catch. Please try again.')
       return
     }
     setReports((prev) => prev.filter((r) => r.id !== report.id))
@@ -149,6 +160,7 @@ export default function App() {
     delete next[report.id]
     setTokens(next)
     writeTokens(next)
+    setToast('Catch deleted.')
   }
 
   const closeForm = () => {
@@ -414,6 +426,30 @@ export default function App() {
             handleDelete(r)
           }}
         />
+      )}
+
+      {confirmDelete && (
+        <ConfirmDialog
+          title="Delete this catch?"
+          message={`The ${confirmDelete.species || 'catch'} report will be permanently removed. This cannot be undone.`}
+          confirmLabel="Delete"
+          danger
+          onConfirm={() => {
+            const r = confirmDelete
+            setConfirmDelete(null)
+            void performDelete(r)
+          }}
+          onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {toast && (
+        <div
+          role="status"
+          className="fixed bottom-5 left-1/2 z-[60] -translate-x-1/2 rounded-full bg-slate-900 px-4 py-2 text-sm font-medium text-white shadow-lg dark:bg-white dark:text-slate-900"
+        >
+          {toast}
+        </div>
       )}
       <Analytics />
     </div>
