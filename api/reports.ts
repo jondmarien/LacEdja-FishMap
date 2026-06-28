@@ -1,5 +1,5 @@
 import { sql } from '@vercel/postgres'
-import { logger } from '../src/lib/logger'
+import { logger } from '../src/lib/logger.js'
 
 export async function GET() {
   try {

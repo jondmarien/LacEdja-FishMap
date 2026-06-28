@@ -5,15 +5,16 @@ interface LogContext {
 }
 
 class Logger {
-  private isProduction = import.meta.env.PROD
   private isServer = typeof window === 'undefined'
+  private isProduction = this.isServer 
+    ? process.env.NODE_ENV === 'production' 
+    : import.meta.env?.PROD ?? false
 
   private format(level: LogLevel, message: string, context?: LogContext) {
     const timestamp = new Date().toISOString()
     const prefix = this.isServer ? '[SERVER]' : '[CLIENT]'
 
     if (this.isProduction) {
-      // Structured JSON for production (great for Vercel logs)
       return JSON.stringify({
         timestamp,
         level,
@@ -22,12 +23,11 @@ class Logger {
         environment: this.isServer ? 'server' : 'client',
       })
     } else {
-      // Pretty output for development
       const color = {
-        debug: '\x1b[36m',   // cyan
-        info: '\x1b[32m',    // green
-        warn: '\x1b[33m',    // yellow
-        error: '\x1b[31m',   // red
+        debug: '\x1b[36m',
+        info: '\x1b[32m',
+        warn: '\x1b[33m',
+        error: '\x1b[31m',
       }[level]
 
       const reset = '\x1b[0m'
@@ -58,7 +58,6 @@ class Logger {
     console.error(this.format('error', message, context))
   }
 
-  // Special method for API routes (always logs)
   api(level: LogLevel, message: string, context?: LogContext) {
     console.log(this.format(level, `[API] ${message}`, context))
   }
