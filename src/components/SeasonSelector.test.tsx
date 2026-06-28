@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
-import SeasonSelector, { type Season } from './SeasonSelector'
+import SeasonSelector from './SeasonSelector'
 
 describe('SeasonSelector', () => {
   const mockOnChange = vi.fn()
@@ -32,7 +32,6 @@ describe('SeasonSelector', () => {
     render(<SeasonSelector value="Spring" onChange={mockOnChange} />)
     
     fireEvent.click(screen.getByText('Spring'))
-    // Still calls onChange (current behavior) — this test documents it
     expect(mockOnChange).toHaveBeenCalled()
   })
 })

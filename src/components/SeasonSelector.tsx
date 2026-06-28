@@ -1,5 +1,3 @@
-import { useState } from 'react'
-
 export type Season = 'Spring' | 'Summer' | 'Fall' | 'Winter'
 
 interface SeasonSelectorProps {
