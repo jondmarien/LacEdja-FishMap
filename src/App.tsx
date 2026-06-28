@@ -4,6 +4,7 @@ import { Camera, Fish, MapPin, Plus, Ruler } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
 import CatchDetail from './components/CatchDetail'
+import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
 import { normalizeReport, type Report } from './lib/reports'
 import { logger } from './lib/logger'
@@ -157,20 +158,27 @@ export default function App() {
   }
 
   return (
-    <div className="min-h-[100dvh] bg-gradient-to-b from-lake-50 via-[#eef6f8] to-white text-slate-900">
+    <div className="min-h-[100dvh] bg-gradient-to-b from-lake-50 via-[#eef6f8] to-white text-slate-900 dark:from-lake-950 dark:via-[#0a1620] dark:to-[#08141a] dark:text-slate-100">
       {/* Header */}
-      <header className="sticky top-0 z-40 border-b border-lake-100/80 bg-white/75 backdrop-blur-md">
+      <header className="sticky top-0 z-40 border-b border-lake-100/80 bg-white/75 backdrop-blur-md dark:border-white/10 dark:bg-lake-950/70">
         <div className="mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <Logo size={36} className="rounded-[11px] shadow-sm" />
             <div className="leading-tight">
-              <div className="text-lg font-semibold tracking-tight text-lake-900">Lac Edja</div>
-              <div className="text-[11px] font-medium text-lake-700/70">Fish Map</div>
+              <div className="text-lg font-semibold tracking-tight text-lake-900 dark:text-lake-100">
+                Lac Edja
+              </div>
+              <div className="text-[11px] font-medium text-lake-700/70 dark:text-lake-300/70">
+                Fish Map
+              </div>
             </div>
           </div>
-          <div className="hidden items-center gap-1.5 text-sm text-slate-500 sm:flex">
-            <MapPin size={15} weight="fill" className="text-lake-600" />
-            Outaouais, Québec
+          <div className="flex items-center gap-3 sm:gap-4">
+            <div className="hidden items-center gap-1.5 text-sm text-slate-500 sm:flex dark:text-slate-400">
+              <MapPin size={15} weight="fill" className="text-lake-600 dark:text-lake-400" />
+              Outaouais, Québec
+            </div>
+            <ThemeToggle />
           </div>
         </div>
       </header>
@@ -178,14 +186,14 @@ export default function App() {
       <main className="mx-auto max-w-6xl px-4 pb-24 sm:px-6 lg:px-8">
         {/* Hero */}
         <section className="animate-rise pt-10 pb-8 sm:pt-14">
-          <div className="flex items-center gap-2 text-sm font-medium text-lake-700">
+          <div className="flex items-center gap-2 text-sm font-medium text-lake-700 dark:text-lake-300">
             <span className="inline-block h-1.5 w-1.5 rounded-full bg-reed-500" />
             Blue Sea, Outaouais
           </div>
-          <h1 className="mt-3 max-w-2xl text-4xl font-semibold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl">
+          <h1 className="mt-3 max-w-2xl text-4xl font-semibold leading-[1.05] tracking-tight text-slate-900 sm:text-5xl lg:text-6xl dark:text-slate-50">
             Every catch on the lake, by season.
           </h1>
-          <p className="mt-4 max-w-xl text-lg leading-relaxed text-slate-600">
+          <p className="mt-4 max-w-xl text-lg leading-relaxed text-slate-600 dark:text-slate-300">
             Drop a pin where the fish are biting, log what you caught, and build a shared family
             record of Lac Edja season after season.
           </p>
@@ -197,7 +205,7 @@ export default function App() {
               <Plus size={17} weight="bold" />
               Log a catch
             </button>
-            <span className="text-sm text-slate-500">
+            <span className="text-sm text-slate-500 dark:text-slate-400">
               {reports.length} {reports.length === 1 ? 'catch' : 'catches'} recorded so far
             </span>
           </div>
@@ -206,11 +214,13 @@ export default function App() {
         {/* Map */}
         <section className="mb-16">
           <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">The lake</h2>
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
+              The lake
+            </h2>
             <SeasonSelector value={season} onChange={setSeason} />
           </div>
 
-          <div className="overflow-hidden rounded-3xl border border-lake-100 bg-lake-950 shadow-lg shadow-lake-900/10">
+          <div className="overflow-hidden rounded-3xl border border-lake-100 bg-lake-950 shadow-lg shadow-lake-900/10 dark:border-white/10">
             <div className="h-[58vh] min-h-[360px] w-full sm:h-[520px] lg:h-[600px]">
               <Suspense
                 fallback={
@@ -227,7 +237,7 @@ export default function App() {
               </Suspense>
             </div>
           </div>
-          <p className="mt-3 text-center text-sm text-slate-500">
+          <p className="mt-3 text-center text-sm text-slate-500 dark:text-slate-400">
             Tap anywhere on the water to drop a pin, or use the locate button to center on you.
           </p>
         </section>
@@ -235,11 +245,11 @@ export default function App() {
         {/* Catches */}
         <section>
           <div className="mb-6 flex items-baseline justify-between gap-4">
-            <h2 className="text-2xl font-semibold tracking-tight text-slate-900">
+            <h2 className="text-2xl font-semibold tracking-tight text-slate-900 dark:text-slate-100">
               {filteredReports.length} {season} {filteredReports.length === 1 ? 'catch' : 'catches'}
             </h2>
             {filteredReports.length > 0 && (
-              <span className="text-sm text-slate-500">Newest first</span>
+              <span className="text-sm text-slate-500 dark:text-slate-400">Newest first</span>
             )}
           </div>
 
@@ -251,25 +261,25 @@ export default function App() {
                   <article
                     key={report.id}
                     onClick={() => setDetail(report)}
-                    className="animate-rise flex cursor-pointer flex-col rounded-2xl border border-lake-100 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md focus-within:border-lake-300"
+                    className="animate-rise flex cursor-pointer flex-col rounded-2xl border border-lake-100 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md focus-within:border-lake-300 dark:border-white/10 dark:bg-lake-900/40 dark:hover:border-white/20"
                     style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
                   >
                     <div className="flex items-start justify-between gap-3">
                       <div className="min-w-0">
-                        <h3 className="truncate text-lg font-semibold text-slate-900">
+                        <h3 className="truncate text-lg font-semibold text-slate-900 dark:text-slate-100">
                           {report.species || 'Unknown catch'}
                         </h3>
-                        <div className="mt-0.5 text-sm text-slate-500">
+                        <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
                           {report.date}
                           {report.time ? ` · ${report.time}` : ''}
                         </div>
                       </div>
                       {report.length_cm ? (
-                        <div className="shrink-0 rounded-xl bg-lake-50 px-3 py-1.5 text-right">
-                          <div className="text-2xl font-semibold tabular-nums leading-none text-lake-700">
+                        <div className="shrink-0 rounded-xl bg-lake-50 px-3 py-1.5 text-right dark:bg-lake-500/15">
+                          <div className="text-2xl font-semibold tabular-nums leading-none text-lake-700 dark:text-lake-300">
                             {report.length_cm}
                           </div>
-                          <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-medium uppercase tracking-wide text-lake-600/70">
+                          <div className="mt-0.5 flex items-center justify-end gap-1 text-[10px] font-medium uppercase tracking-wide text-lake-600/70 dark:text-lake-300/70">
                             <Ruler size={11} weight="bold" /> cm
                           </div>
                         </div>
@@ -279,12 +289,12 @@ export default function App() {
                     {(report.weight_kg || (report.count ?? 0) > 1) && (
                       <div className="mt-3 flex flex-wrap gap-2">
                         {report.weight_kg ? (
-                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-slate-300">
                             {report.weight_kg} kg
                           </span>
                         ) : null}
                         {(report.count ?? 0) > 1 ? (
-                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600">
+                          <span className="rounded-full bg-slate-100 px-2.5 py-1 text-xs font-medium text-slate-600 dark:bg-white/10 dark:text-slate-300">
                             {report.count} fish
                           </span>
                         ) : null}
@@ -292,11 +302,13 @@ export default function App() {
                     )}
 
                     {report.bait && (
-                      <div className="mt-3 text-sm italic text-slate-500">on {report.bait}</div>
+                      <div className="mt-3 text-sm italic text-slate-500 dark:text-slate-400">
+                        on {report.bait}
+                      </div>
                     )}
 
                     {report.notes && (
-                      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-slate-600">
+                      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-slate-600 dark:text-slate-300">
                         {report.notes}
                       </p>
                     )}
@@ -306,7 +318,7 @@ export default function App() {
                         {report.photo_urls.slice(0, 3).map((url, idx) => (
                           <div
                             key={url}
-                            className="aspect-square overflow-hidden rounded-lg border border-lake-100 bg-lake-50"
+                            className="aspect-square overflow-hidden rounded-lg border border-lake-100 bg-lake-50 dark:border-white/10 dark:bg-white/5"
                           >
                             <img
                               src={url}
@@ -319,10 +331,12 @@ export default function App() {
                       </div>
                     )}
 
-                    <div className="mt-4 flex items-center justify-between gap-2 pt-1 text-xs text-slate-400">
+                    <div className="mt-4 flex items-center justify-between gap-2 pt-1 text-xs text-slate-400 dark:text-slate-500">
                       <div className="flex items-center gap-3">
                         {report.reporter && (
-                          <span className="font-medium text-slate-500">by {report.reporter}</span>
+                          <span className="font-medium text-slate-500 dark:text-slate-300">
+                            by {report.reporter}
+                          </span>
                         )}
                         {report.photo_urls && report.photo_urls.length > 0 ? (
                           <span className="flex items-center gap-1">
@@ -332,7 +346,7 @@ export default function App() {
                         ) : null}
                       </div>
                       {canManage && (
-                        <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700">
+                        <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700 dark:text-reed-400">
                           Yours
                         </span>
                       )}
@@ -342,12 +356,14 @@ export default function App() {
               })}
             </div>
           ) : (
-            <div className="rounded-2xl border border-dashed border-lake-200 bg-white/60 px-6 py-16 text-center">
-              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-lake-50 text-lake-600">
+            <div className="rounded-2xl border border-dashed border-lake-200 bg-white/60 px-6 py-16 text-center dark:border-white/15 dark:bg-white/5">
+              <div className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-lake-50 text-lake-600 dark:bg-lake-500/15 dark:text-lake-300">
                 <Fish size={24} weight="fill" />
               </div>
-              <p className="mt-4 font-medium text-slate-700">No {season} catches yet.</p>
-              <p className="mt-1 text-sm text-slate-500">
+              <p className="mt-4 font-medium text-slate-700 dark:text-slate-200">
+                No {season} catches yet.
+              </p>
+              <p className="mt-1 text-sm text-slate-500 dark:text-slate-400">
                 Tap the map or use Log a catch to record the first one.
               </p>
             </div>
@@ -355,10 +371,10 @@ export default function App() {
         </section>
       </main>
 
-      <footer className="border-t border-lake-100 bg-white/60">
+      <footer className="border-t border-lake-100 bg-white/60 dark:border-white/10 dark:bg-white/5">
         <div className="mx-auto flex max-w-6xl flex-col items-center gap-1 px-4 py-8 text-center sm:px-6 lg:px-8">
           <Logo size={28} className="rounded-lg opacity-90" />
-          <p className="mt-2 text-sm text-slate-500">
+          <p className="mt-2 text-sm text-slate-500 dark:text-slate-400">
             Lac Edja Fish Map. Built for the cottage, for family.
           </p>
         </div>

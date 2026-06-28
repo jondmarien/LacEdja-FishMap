@@ -1,5 +1,9 @@
 @import 'tailwindcss';
 
+/* Selector-based dark mode driven by <html data-theme="dark"> (set in JS so
+   we can offer light / dark / system). */
+@custom-variant dark (&:where([data-theme='dark'], [data-theme='dark'] *));
+
 /* ---- Lac Edja brand theme (lake / nature) ---- */
 @theme {
   --font-sans:
@@ -40,6 +44,14 @@ body {
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   text-rendering: optimizeLegibility;
+}
+
+[data-theme='dark'] body {
+  background-color: #08141a;
+  color: #dbe7ec;
+}
+[data-theme='dark'] {
+  color-scheme: dark;
 }
 
 #root {
@@ -129,7 +141,11 @@ body {
 
 /* Catch detail widget (native Popover API) */
 .edja-detail {
+  position: fixed;
+  inset: 0;
+  margin: auto; /* center in the viewport */
   width: min(440px, 92vw);
+  height: fit-content;
   max-height: 88dvh;
   overflow-y: auto;
   padding: 20px;
@@ -140,8 +156,34 @@ body {
   color: #0f2733;
 }
 .edja-detail::backdrop {
-  background: rgba(15, 23, 42, 0.45);
+  background: rgba(8, 20, 26, 0.55);
   backdrop-filter: blur(2px);
+}
+
+/* ---- Dark variants for CSS-driven map UI + popover ---- */
+[data-theme='dark'] .edja-detail {
+  background: #0f2430;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #dbe7ec;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.5);
+}
+[data-theme='dark'] .edja-popup-wrap .maplibregl-popup-content {
+  background: #0f2430;
+  border-color: rgba(255, 255, 255, 0.08);
+  color: #dbe7ec;
+}
+[data-theme='dark'] .edja-popup-wrap .maplibregl-popup-tip {
+  border-top-color: #0f2430;
+}
+[data-theme='dark'] .edja-popup-title {
+  color: #f1f5f9;
+}
+[data-theme='dark'] .edja-popup-meta,
+[data-theme='dark'] .edja-popup-bait {
+  color: #94a3b8;
+}
+[data-theme='dark'] .edja-popup-stats {
+  color: var(--color-lake-300);
 }
 .edja-detail:focus-visible {
   outline: none;
