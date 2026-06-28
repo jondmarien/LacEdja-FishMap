@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { Analytics } from '@vercel/analytics/react'
 import LacEdjaMap from './components/LacEdjaMap'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
@@ -147,6 +148,7 @@ export default function App() {
           onSubmit={handleReportSubmit}
         />
       )}
+      <Analytics />
     </div>
   )
 }
