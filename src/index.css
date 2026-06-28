@@ -127,6 +127,32 @@ body {
   display: block;
 }
 
+/* Catch detail widget (native Popover API) */
+.edja-detail {
+  width: min(440px, 92vw);
+  max-height: 88dvh;
+  overflow-y: auto;
+  padding: 20px;
+  border: 1px solid var(--color-lake-100);
+  border-radius: 20px;
+  box-shadow: 0 24px 60px rgba(8, 51, 68, 0.28);
+  background: #fff;
+  color: #0f2733;
+}
+.edja-detail::backdrop {
+  background: rgba(15, 23, 42, 0.45);
+  backdrop-filter: blur(2px);
+}
+.edja-detail:focus-visible {
+  outline: none;
+}
+/* Entrance animation for the popover */
+@media (prefers-reduced-motion: no-preference) {
+  .edja-detail:popover-open {
+    animation: edja-rise 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+  }
+}
+
 /* Respect reduced-motion preferences */
 @media (prefers-reduced-motion: reduce) {
   *,

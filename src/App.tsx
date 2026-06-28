@@ -1,8 +1,9 @@
 import { Suspense, lazy, useCallback, useEffect, useMemo, useState } from 'react'
 import { Analytics } from '@vercel/analytics/react'
-import { DownloadSimple, Fish, MapPin, PencilSimple, Plus, Ruler, Trash } from '@phosphor-icons/react'
+import { Camera, Fish, MapPin, Plus, Ruler } from '@phosphor-icons/react'
 import SeasonSelector, { type Season } from './components/SeasonSelector'
 import ReportForm from './components/ReportForm'
+import CatchDetail from './components/CatchDetail'
 import Logo from './components/Logo'
 import { normalizeReport, type Report } from './lib/reports'
 import { logger } from './lib/logger'
@@ -29,34 +30,13 @@ function writeTokens(tokens: Record<string, string>) {
   }
 }
 
-// Force-download a (cross-origin) blob image. Vercel Blob serves with open
-// CORS, so we can fetch it and trigger a real download; fall back to opening
-// it in a new tab if the fetch is blocked.
-async function downloadImage(url: string, filename: string) {
-  try {
-    const res = await fetch(url)
-    if (!res.ok) throw new Error(`HTTP ${res.status}`)
-    const blob = await res.blob()
-    const objectUrl = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = objectUrl
-    a.download = filename
-    document.body.appendChild(a)
-    a.click()
-    a.remove()
-    URL.revokeObjectURL(objectUrl)
-  } catch (err) {
-    logger.warn('Photo download fell back to new tab', { error: String(err) })
-    window.open(url, '_blank', 'noopener')
-  }
-}
-
 export default function App() {
   const [season, setSeason] = useState<Season>('Summer')
   const [reports, setReports] = useState<Report[]>([])
   const [showForm, setShowForm] = useState(false)
   const [pendingLocation, setPendingLocation] = useState<{ lat: number; lng: number } | null>(null)
   const [editing, setEditing] = useState<{ report: Report; token: string } | null>(null)
+  const [detail, setDetail] = useState<Report | null>(null)
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
 
@@ -110,6 +90,13 @@ export default function App() {
     setPendingLocation({ lat, lng })
     setShowForm(true)
   }, [])
+
+  const handleMarkerClick = useCallback(
+    (id: string) => {
+      setDetail(reports.find((r) => r.id === id) ?? null)
+    },
+    [reports],
+  )
 
   const handleAddCatch = () => {
     setEditing(null)
@@ -232,7 +219,11 @@ export default function App() {
                   </div>
                 }
               >
-                <LacEdjaMap onMapClick={handleMapClick} markers={markers} />
+                <LacEdjaMap
+                  onMapClick={handleMapClick}
+                  onMarkerClick={handleMarkerClick}
+                  markers={markers}
+                />
               </Suspense>
             </div>
           </div>
@@ -259,7 +250,8 @@ export default function App() {
                 return (
                   <article
                     key={report.id}
-                    className="animate-rise flex flex-col rounded-2xl border border-lake-100 bg-white p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md"
+                    onClick={() => setDetail(report)}
+                    className="animate-rise flex cursor-pointer flex-col rounded-2xl border border-lake-100 bg-white p-5 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-lake-200 hover:shadow-md focus-within:border-lake-300"
                     style={{ animationDelay: `${Math.min(i, 8) * 45}ms` }}
                   >
                     <div className="flex items-start justify-between gap-3">
@@ -304,68 +296,45 @@ export default function App() {
                     )}
 
                     {report.notes && (
-                      <p className="mt-3 line-clamp-3 text-sm leading-relaxed text-slate-600">
+                      <p className="mt-3 line-clamp-2 text-sm leading-relaxed text-slate-600">
                         {report.notes}
                       </p>
                     )}
 
                     {report.photo_urls && report.photo_urls.length > 0 && (
                       <div className="mt-3 grid grid-cols-3 gap-2">
-                        {report.photo_urls.map((url, idx) => (
+                        {report.photo_urls.slice(0, 3).map((url, idx) => (
                           <div
                             key={url}
-                            className="group relative aspect-square overflow-hidden rounded-lg border border-lake-100 bg-lake-50"
+                            className="aspect-square overflow-hidden rounded-lg border border-lake-100 bg-lake-50"
                           >
-                            <a href={url} target="_blank" rel="noopener noreferrer">
-                              <img
-                                src={url}
-                                alt={`${report.species || 'catch'} photo ${idx + 1}`}
-                                loading="lazy"
-                                className="h-full w-full object-cover transition-transform duration-200 group-hover:scale-105"
-                              />
-                            </a>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                downloadImage(
-                                  url,
-                                  `${(report.species || 'catch').replace(/\s+/g, '-').toLowerCase()}-${report.date}-${idx + 1}.jpg`,
-                                )
-                              }
-                              aria-label="Download photo"
-                              className="absolute bottom-1 right-1 rounded-md bg-white/90 p-1 text-slate-600 opacity-0 shadow-sm transition-opacity hover:text-lake-700 focus:opacity-100 group-hover:opacity-100"
-                            >
-                              <DownloadSimple size={14} weight="bold" />
-                            </button>
+                            <img
+                              src={url}
+                              alt={`${report.species || 'catch'} photo ${idx + 1}`}
+                              loading="lazy"
+                              className="h-full w-full object-cover"
+                            />
                           </div>
                         ))}
                       </div>
                     )}
 
-                    <div className="mt-4 flex items-end justify-between gap-2 pt-1">
-                      <div className="flex items-center gap-3 text-xs text-slate-400">
+                    <div className="mt-4 flex items-center justify-between gap-2 pt-1 text-xs text-slate-400">
+                      <div className="flex items-center gap-3">
                         {report.reporter && (
                           <span className="font-medium text-slate-500">by {report.reporter}</span>
                         )}
+                        {report.photo_urls && report.photo_urls.length > 0 ? (
+                          <span className="flex items-center gap-1">
+                            <Camera size={13} />
+                            {report.photo_urls.length}
+                          </span>
+                        ) : null}
                       </div>
-
                       {canManage && (
-                        <div className="flex items-center gap-1">
-                          <button
-                            onClick={() => handleEdit(report)}
-                            aria-label="Edit catch"
-                            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-lake-50 hover:text-lake-700"
-                          >
-                            <PencilSimple size={16} />
-                          </button>
-                          <button
-                            onClick={() => handleDelete(report)}
-                            aria-label="Delete catch"
-                            className="rounded-lg p-1.5 text-slate-400 transition-colors hover:bg-red-50 hover:text-red-600"
-                          >
-                            <Trash size={16} />
-                          </button>
-                        </div>
+                        <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700">
+                          Yours
+                        </span>
                       )}
                     </div>
                   </article>
@@ -414,6 +383,22 @@ export default function App() {
           onSubmit={handleReportSubmit}
         />
       ) : null}
+
+      {detail && (
+        <CatchDetail
+          report={detail}
+          canManage={Boolean(tokens[detail.id])}
+          onClose={() => setDetail(null)}
+          onEdit={(r) => {
+            setDetail(null)
+            handleEdit(r)
+          }}
+          onDelete={(r) => {
+            setDetail(null)
+            handleDelete(r)
+          }}
+        />
+      )}
       <Analytics />
     </div>
   )

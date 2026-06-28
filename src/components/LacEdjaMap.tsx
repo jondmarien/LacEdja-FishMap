@@ -64,6 +64,7 @@ interface LacEdjaMapProps {
   center?: [number, number]
   zoom?: number
   onMapClick?: (lat: number, lng: number) => void
+  onMarkerClick?: (id: string) => void
   markers?: MapMarker[]
 }
 
@@ -91,18 +92,21 @@ export default function LacEdjaMap({
   center = DEFAULT_CENTER,
   zoom = 13,
   onMapClick,
+  onMarkerClick,
   markers = [],
 }: LacEdjaMapProps) {
   const mapContainer = useRef<HTMLDivElement>(null)
   const map = useRef<maplibregl.Map | null>(null)
   const markerRefs = useRef<maplibregl.Marker[]>([])
 
-  // Keep the latest click handler in a ref so the init effect can run once
-  // without tearing down and rebuilding the map on every parent re-render.
+  // Keep the latest handlers in refs so the init effect can run once without
+  // tearing down and rebuilding the map on every parent re-render.
   const onMapClickRef = useRef(onMapClick)
+  const onMarkerClickRef = useRef(onMarkerClick)
   useEffect(() => {
     onMapClickRef.current = onMapClick
-  }, [onMapClick])
+    onMarkerClickRef.current = onMarkerClick
+  }, [onMapClick, onMarkerClick])
 
   // Initialize the map exactly once.
   useEffect(() => {
@@ -173,8 +177,10 @@ export default function LacEdjaMap({
       el.className = 'edja-pin'
       el.innerHTML = PIN_SVG
       el.setAttribute('role', 'button')
+      el.setAttribute('tabindex', '0')
       el.setAttribute('aria-label', `Catch: ${marker.species}`)
 
+      // Hover preview (desktop) — a quick map-anchored peek.
       const popup = new maplibregl.Popup({
         offset: 30,
         closeButton: false,
@@ -186,22 +192,31 @@ export default function LacEdjaMap({
         .setPopup(popup)
         .addTo(m)
 
-      // Open the popup on hover (desktop); click still toggles it (mobile).
-      el.addEventListener('mouseenter', () => placed.togglePopup())
+      el.addEventListener('mouseenter', () => {
+        if (!popup.isOpen()) placed.togglePopup()
+      })
       el.addEventListener('mouseleave', () => {
         if (popup.isOpen()) popup.remove()
+      })
+
+      // Click/tap opens the full detail widget — and must NOT fall through to
+      // the map's click handler (which would start a new report).
+      el.addEventListener('click', (ev) => {
+        ev.stopPropagation()
+        if (popup.isOpen()) popup.remove()
+        onMarkerClickRef.current?.(marker.id)
       })
 
       markerRefs.current.push(placed)
     }
 
-    // Fit the view to the catches so they are always visible.
-    if (valid.length === 1) {
-      m.easeTo({ center: [valid[0].lng, valid[0].lat], zoom: Math.max(m.getZoom(), 13), duration: 600 })
-    } else if (valid.length > 1) {
+    // Keep the lake AND the season's catches in frame (anchor on the lake so
+    // the view never wanders off to a single far-away point).
+    if (valid.length > 0) {
       const bounds = new maplibregl.LngLatBounds()
+      bounds.extend(DEFAULT_CENTER)
       valid.forEach((mk) => bounds.extend([mk.lng, mk.lat]))
-      m.fitBounds(bounds, { padding: 70, maxZoom: 15, duration: 600 })
+      m.fitBounds(bounds, { padding: 80, maxZoom: 14, duration: 600 })
     }
   }, [markers])
 
