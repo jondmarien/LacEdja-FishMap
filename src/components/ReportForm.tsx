@@ -22,14 +22,17 @@ const inputClass =
 const labelClass = 'mb-1 block text-xs font-medium text-slate-500 dark:text-slate-400'
 
 /**
- * iPhone cameras shoot HEIC/HEIF, which most non-Apple browsers cannot render
- * in <img>. Convert those to JPEG in the browser before upload so photos
- * display everywhere. heic2any is lazy-imported so it never touches the main
- * bundle for non-HEIC uploads.
+ * Phone cameras shoot HEIC (iPhone) or HEIF (some Android) — the same
+ * container format, which most non-Apple browsers cannot render in <img>.
+ * Convert either to JPEG in the browser before upload so photos display
+ * everywhere. heic2any (libheif) decodes both; it is lazy-imported so it
+ * never touches the main bundle for ordinary JPEG/PNG uploads.
  */
 async function toUploadable(file: File): Promise<File> {
-  const isHeic = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
-  if (!isHeic) return file
+  // Matches image/heic, image/heif, image/heif-sequence, and .heic/.heif names
+  // (some phones report an empty MIME type, so we check the extension too).
+  const isHeicOrHeif = /heic|heif/i.test(file.type) || /\.(heic|heif)$/i.test(file.name)
+  if (!isHeicOrHeif) return file
   const heic2any = (await import('heic2any')).default
   const out = await heic2any({ blob: file, toType: 'image/jpeg', quality: 0.9 })
   const blob = Array.isArray(out) ? out[0] : out
