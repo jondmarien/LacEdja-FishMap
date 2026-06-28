@@ -1,32 +1,19 @@
 import { put } from '@vercel/blob'
+import { resolveBlobToken } from '../src/lib/blobToken.js'
 import { logger } from '../src/lib/logger.js'
 
 /**
- * Resolve the Blob read-write token. Normally Vercel injects
- * BLOB_READ_WRITE_TOKEN when a Blob store is connected to the project; fall
- * back to any <PREFIX>_READ_WRITE_TOKEN var so uploads keep working even if
- * the store was connected with a custom prefix.
- */
-function resolveBlobToken(): string | undefined {
-  if (process.env.BLOB_READ_WRITE_TOKEN) return process.env.BLOB_READ_WRITE_TOKEN
-  const key = Object.keys(process.env).find((k) => /_READ_WRITE_TOKEN$/.test(k))
-  if (key) {
-    logger.api('warn', 'Using non-standard Blob token env var', { envVar: key })
-    return process.env[key]
-  }
-  return undefined
-}
-
-/**
- * Server-side photo upload. The client sends an already-optimized JPEG as
- * multipart/form-data and we stream it to Blob with put(). This avoids the
- * client-token + onUploadCompleted callback flow, which was stalling uploads
- * (token issued, but the file never finalized into the store).
+ * Server-side photo upload to a PRIVATE Blob store. The client sends the
+ * already-optimized JPEG as the raw request body with ?filename=. We store it
+ * with private access and return a same-origin proxy URL (/api/photo?pathname=)
+ * so the rest of the app can display/download it without exposing the store.
  */
 export async function POST(request: Request) {
   const token = resolveBlobToken()
   if (!token) {
-    const blobVars = Object.keys(process.env).filter((k) => /BLOB/i.test(k))
+    const blobVars = Object.keys((globalThis as any).process?.env ?? {}).filter((k) =>
+      /BLOB/i.test(k),
+    )
     logger.api('error', 'No Blob read-write token in environment', { blobVars })
     return Response.json(
       {
@@ -37,8 +24,6 @@ export async function POST(request: Request) {
     )
   }
 
-  // The client sends the image as the raw request body (not multipart, which
-  // the Vercel Node Web handler doesn't reliably parse) with ?filename=.
   const filename = new URL(request.url).searchParams.get('filename') || 'photo.jpg'
   const contentType = request.headers.get('content-type') || 'image/jpeg'
 
@@ -56,13 +41,16 @@ export async function POST(request: Request) {
 
   try {
     const blob = await put(filename, bytes, {
-      access: 'public',
+      access: 'private',
       addRandomSuffix: true,
       contentType,
       token,
     })
-    logger.api('info', 'Photo uploaded', { url: blob.url, bytes: bytes.byteLength })
-    return Response.json({ url: blob.url })
+    // Hand back a proxy URL, not the private blob URL (which isn't directly
+    // viewable). The /api/photo route streams it with the server token.
+    const proxyUrl = `/api/photo?pathname=${encodeURIComponent(blob.pathname)}`
+    logger.api('info', 'Photo uploaded', { pathname: blob.pathname, bytes: bytes.byteLength })
+    return Response.json({ url: proxyUrl })
   } catch (error) {
     logger.api('error', 'Photo upload failed', { error: String(error) })
     return Response.json({ error: (error as Error).message }, { status: 400 })
