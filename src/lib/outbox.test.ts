@@ -67,6 +67,42 @@ describe('enqueuePatch', () => {
   })
 })
 
+describe('enqueuePatch same-id-as-pending-create collision', () => {
+  it('cannot coexist with a pending create for the same id: the outbox table keys solely on id, so a same-id patch throws rather than silently racing the create', async () => {
+    // The outbox table's Dexie schema is `id, status` -- `id` is the sole
+    // primary key. That means a create entry and a patch entry can never
+    // occupy two separate rows for the same catch id: attempting to add a
+    // second row with a key already in use throws a ConstraintError instead
+    // of silently creating a duplicate. This is *why* flushOutbox's
+    // create-before-patch concern (see its docstring) can't actually
+    // manifest as two racing entries in today's schema -- there's structurally
+    // only ever one row per id. This test pins that guarantee down so a
+    // future schema change (e.g. switching to a compound/auto-incrementing
+    // key) doesn't silently reintroduce the possibility of a same-id
+    // create/patch race without anyone noticing.
+    const result = await enqueueCreate({ species: 'Bass' }, [])
+    if (!result.ok) throw new Error('expected ok result')
+    const id = result.id
+
+    await expect(
+      db.outbox.add({
+        id,
+        op: 'patch',
+        status: 'pending',
+        payload: { notes: 'racing patch' },
+        editToken: 'tok',
+        attempts: 0,
+        createdAt: Date.now(),
+      })
+    ).rejects.toThrow()
+
+    // The original create entry is untouched.
+    const entries = await getOutboxEntries()
+    expect(entries).toHaveLength(1)
+    expect(entries[0].op).toBe('create')
+  })
+})
+
 describe('enqueueDelete', () => {
   it('creates a delete entry with op=delete and the given editToken, no payload/photos', async () => {
     const catchId = 'existing-catch-id-2'

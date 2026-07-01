@@ -104,6 +104,38 @@ describe('flushOutbox', () => {
     expect(remaining).toHaveLength(0)
   })
 
+  it('flushes a create entry before a later-queued patch entry for a DIFFERENT id, preserving createdAt order across mixed op types', async () => {
+    // Note on scope: the outbox table's Dexie schema keys solely on `id`
+    // (see src/lib/db.ts), so a create entry and a patch entry can never
+    // coexist for the SAME catch id -- adding a second row with a key
+    // already in use throws (see the dedicated regression test in
+    // src/lib/outbox.test.ts). That makes the literal "same id, create then
+    // patch" race structurally impossible today. What *is* real, and what
+    // this test pins down, is that flushOutbox's createdAt ordering holds
+    // across mixed op types (not just same-op entries, which
+    // 'processes multiple entries sequentially...' above already covers):
+    // an earlier-queued create for one catch must have its POST attempted
+    // before a later-queued patch for another catch gets its PATCH
+    // attempted, preserving strict FIFO regardless of op type.
+    const callOrder: string[] = []
+    ;(fetch as any).mockImplementation(async (url: string, init: RequestInit) => {
+      callOrder.push(`${init.method} ${String(url)}`)
+      return new Response(JSON.stringify({ id: 'whatever' }), { status: 201 })
+    })
+
+    const createResult = await enqueueCreate({ species: 'Bass' }, [])
+    if (!createResult.ok) throw new Error('expected ok')
+    await new Promise((r) => setTimeout(r, 2)) // ensure distinct createdAt
+    await enqueuePatch('other-catch-id', 'tok-other', { notes: 'edit' }, [])
+
+    await flushOutbox()
+
+    expect(callOrder).toHaveLength(2)
+    expect(callOrder[0]).toMatch(/^POST /)
+    expect(callOrder[0]).toContain('/api/reports')
+    expect(callOrder[1]).toBe('PATCH /api/reports?id=other-catch-id')
+  })
+
   it('persists partial photo upload progress when a later photo upload fails', async () => {
     const photo1 = new Blob(['a'], { type: 'image/jpeg' })
     const photo2 = new Blob(['b'], { type: 'image/jpeg' })
