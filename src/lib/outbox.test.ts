@@ -8,6 +8,7 @@ import {
   updateEntryStatus,
   discardEntry,
   countActive,
+  resetForRetry,
 } from './outbox'
 
 beforeEach(async () => {
@@ -104,6 +105,39 @@ describe('updateEntryStatus', () => {
     await updateEntryStatus(id, 'pending')
     ;[entry] = await getOutboxEntries()
     expect(entry.status).toBe('pending')
+  })
+})
+
+describe('resetForRetry', () => {
+  it('resets a failed entry to pending, zeroing attempts and clearing lastError', async () => {
+    const result = await enqueueCreate({ species: 'Muskie' }, [])
+    if (!result.ok) throw new Error('expected ok result')
+    const id = result.id
+
+    await updateEntryStatus(id, 'failed', 'network error')
+    await db.outbox.update(id, { attempts: 4 })
+    let [entry] = await getOutboxEntries()
+    expect(entry.status).toBe('failed')
+    expect(entry.attempts).toBe(4)
+    expect(entry.lastError).toBe('network error')
+
+    await resetForRetry(id)
+    ;[entry] = await getOutboxEntries()
+    expect(entry.status).toBe('pending')
+    expect(entry.attempts).toBe(0)
+    expect(entry.lastError).toBeUndefined()
+  })
+
+  it('still counts toward countActive/cap accounting after reset, same as when it was failed', async () => {
+    const result = await enqueueCreate({ species: 'Muskie' }, [])
+    if (!result.ok) throw new Error('expected ok result')
+    const id = result.id
+
+    await updateEntryStatus(id, 'failed', 'network error')
+    expect(await countActive()).toBe(1)
+
+    await resetForRetry(id)
+    expect(await countActive()).toBe(1)
   })
 })
 

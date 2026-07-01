@@ -2,11 +2,12 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ReportForm from './ReportForm'
 import type { Season } from './SeasonSelector'
-import { enqueueCreate } from '../lib/outbox'
+import { enqueueCreate, enqueuePatch } from '../lib/outbox'
 import { registerBackgroundSync } from '../lib/sync'
 
 vi.mock('../lib/outbox', () => ({
   enqueueCreate: vi.fn(),
+  enqueuePatch: vi.fn(),
 }))
 
 vi.mock('../lib/sync', () => ({
@@ -16,6 +17,7 @@ vi.mock('../lib/sync', () => ({
 const mockOnClose = vi.fn()
 const mockOnSubmit = vi.fn()
 const mockEnqueueCreate = enqueueCreate as unknown as ReturnType<typeof vi.fn>
+const mockEnqueuePatch = enqueuePatch as unknown as ReturnType<typeof vi.fn>
 const mockRegisterBackgroundSync = registerBackgroundSync as unknown as ReturnType<typeof vi.fn>
 
 const defaultProps = {
@@ -30,6 +32,7 @@ describe('ReportForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     mockEnqueueCreate.mockResolvedValue({ ok: true, id: 'outbox-id-1' })
+    mockEnqueuePatch.mockResolvedValue(undefined)
     mockRegisterBackgroundSync.mockResolvedValue(true)
     // Default: API unreachable, so the form uses its offline outbox path.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
@@ -297,8 +300,11 @@ describe('ReportForm', () => {
     expect(mockOnClose).not.toHaveBeenCalled()
   })
 
-  it('edits (isEditing: true) still work as before: PATCH is attempted and onSubmit fires with the local-fallback payload on failure', async () => {
-    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+  it('edits succeed: PATCH is attempted and onSubmit fires with the server response', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ id: 'existing-id', species: 'Trout' }),
+    } as Response)
     vi.stubGlobal('fetch', fetchMock)
 
     const report = {
@@ -331,6 +337,67 @@ describe('ReportForm', () => {
     const submitted = mockOnSubmit.mock.calls[0][0]
     expect(submitted.id).toBe('existing-id')
     expect(mockEnqueueCreate).not.toHaveBeenCalled()
+    expect(mockEnqueuePatch).not.toHaveBeenCalled()
+  })
+
+  const editReport = {
+    id: 'existing-id',
+    date: '2026-01-01',
+    time: '10:00',
+    species: 'Trout',
+    length_cm: 30,
+    weight_kg: 1,
+    count: 1,
+    notes: '',
+    bait: '',
+    reporter: 'Jon',
+    lat: 46.18,
+    lng: -76.01,
+    season: 'Summer' as Season,
+    photo_urls: [],
+  }
+
+  it('a network error on PATCH queues via enqueuePatch, applies the edit optimistically, and does not use the old local-fallback shape', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    render(<ReportForm {...defaultProps} report={editReport} editToken="tok-123" />)
+
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Steelhead' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+
+    expect(mockEnqueuePatch).toHaveBeenCalledTimes(1)
+    const [id, editToken, payload, pendingPhotos] = mockEnqueuePatch.mock.calls[0]
+    expect(id).toBe('existing-id')
+    expect(editToken).toBe('tok-123')
+    expect(payload.species).toBe('Steelhead')
+    expect(pendingPhotos).toEqual([])
+    expect(mockRegisterBackgroundSync).toHaveBeenCalled()
+
+    // Optimistic local update: the edited values are what's passed to onSubmit.
+    const submitted = mockOnSubmit.mock.calls[0][0]
+    expect(submitted.id).toBe('existing-id')
+    expect(submitted.species).toBe('Steelhead')
+  })
+
+  it('a reachable HTTP error (400) on PATCH does not call enqueuePatch and shows an error state', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}) } as Response),
+    )
+
+    render(<ReportForm {...defaultProps} report={editReport} editToken="tok-123" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/changes could not be saved/i)).toBeInTheDocument(),
+    )
+    expect(mockEnqueuePatch).not.toHaveBeenCalled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
   })
 
   it('calls onClose when cancel is clicked', () => {

@@ -133,6 +133,20 @@ export async function incrementAttempts(id: string): Promise<number> {
 }
 
 /**
+ * Resets a failed entry back to `pending` so the flush engine will pick it
+ * up again: clears `lastError` and zeroes `attempts` (so it gets the full
+ * backoff schedule again rather than immediately re-hitting the
+ * MAX_ATTEMPTS ceiling). Used by the Retry action on failed entries.
+ */
+export async function resetForRetry(id: string): Promise<void> {
+  await db.outbox.update(id, {
+    status: 'pending',
+    attempts: 0,
+    lastError: undefined,
+  })
+}
+
+/**
  * Records a successfully uploaded photo for an entry: appends `url` to
  * `uploadedPhotoUrls` and removes one Blob from `pendingPhotos` (the one that
  * was just uploaded), persisting immediately so partial upload progress

@@ -3,7 +3,7 @@ import { Camera, Crosshair, ImageSquare, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
 import type { Report } from '../lib/reports'
-import { enqueueCreate } from '../lib/outbox'
+import { enqueueCreate, enqueuePatch } from '../lib/outbox'
 import { registerBackgroundSync } from '../lib/sync'
 
 interface ReportFormProps {
@@ -300,12 +300,25 @@ export default function ReportForm({
       photo_urls: photoUrls,
     }
 
-    // Edits are out of scope for the outbox (Task 6.1 handles offline
-    // edits/deletes) — keep the existing behavior for that path unchanged.
+    // Edit path (Task 6.1): route through the outbox on a genuine network
+    // error (fetch itself throws — no Response at all), matching the
+    // create path's network-vs-HTTP-error split. A reachable-but-rejecting
+    // response (wrong edit token, already deleted, validation failure) is a
+    // real error and must NOT be queued — retrying it would just burn
+    // outbox attempts on something that was never going to succeed.
     if (isEditing) {
+      // uploadNetworkError already tells us we went offline mid-photo-batch —
+      // route straight to the outbox without attempting the PATCH.
+      if (uploadNetworkError) {
+        await queueEditViaOutbox(reportPayload, pendingPhotoBlobs)
+        setSubmitting(false)
+        return
+      }
+
+      let res: Response
       try {
         const url = `/api/reports?id=${encodeURIComponent(report!.id)}`
-        const res = await fetch(url, {
+        res = await fetch(url, {
           method: 'PATCH',
           headers: {
             'Content-Type': 'application/json',
@@ -313,14 +326,27 @@ export default function ReportForm({
           },
           body: JSON.stringify(reportPayload),
         })
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const savedReport = await res.json()
-        logger.info('Report updated', { id: savedReport.id, species: savedReport.species })
-        onSubmit(savedReport)
       } catch (err) {
-        logger.error('Report edit failed, keeping locally', { error: String(err) })
-        onSubmit({ ...reportPayload, id: report?.id })
+        // Network error: no Response at all — queue via the outbox.
+        logger.warn('Report edit hit a network error, queuing for later', {
+          error: String(err),
+        })
+        await queueEditViaOutbox(reportPayload, pendingPhotoBlobs)
+        setSubmitting(false)
+        return
       }
+
+      if (!res.ok) {
+        // Reachable server, real rejection — do not queue; surface the error.
+        logger.error('Report edit rejected by server', { status: res.status })
+        setSubmitError('The changes could not be saved. Please check the details and try again.')
+        setSubmitting(false)
+        return
+      }
+
+      const savedReport = await res.json()
+      logger.info('Report updated', { id: savedReport.id, species: savedReport.species })
+      onSubmit(savedReport)
       setSubmitting(false)
       onClose()
       return
@@ -387,6 +413,21 @@ export default function ReportForm({
     // the rest.
     void registerBackgroundSync()
     onSubmit({ ...reportPayload, id: result.id })
+    onClose()
+  }
+
+  /** Enqueues a patch in the offline outbox for an existing (already-synced)
+   * catch, kicks off Background Sync, and optimistically applies the edited
+   * values locally (via onSubmit) so the user's edit doesn't appear to
+   * vanish while queued — see Task 6.1 design notes. */
+  const queueEditViaOutbox = async (
+    reportPayload: Record<string, unknown>,
+    pendingPhotoBlobs: File[],
+  ) => {
+    await enqueuePatch(report!.id, editToken!, reportPayload, pendingPhotoBlobs)
+    logger.info('Report edit queued in outbox', { id: report!.id })
+    void registerBackgroundSync()
+    onSubmit({ ...reportPayload, id: report!.id })
     onClose()
   }
 
