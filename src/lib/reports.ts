@@ -1,4 +1,5 @@
 import type { Season } from '../components/SeasonSelector'
+import { db, type OutboxEntry } from './db'
 
 /**
  * Canonical client-side shape for a catch report. The database stores the
@@ -21,6 +22,10 @@ export interface Report {
   notes?: string
   reporter?: string
   photo_urls?: string[]
+  /** True for catches that only exist as a queued, not-yet-synced outbox
+   * entry. Absent/undefined for server-confirmed reports. Set explicitly by
+   * `outboxEntryToReport`, never by `normalizeReport`. */
+  pending?: boolean
 }
 
 function toNumber(value: unknown): number | undefined {
@@ -53,5 +58,57 @@ export function normalizeReport(row: Record<string, unknown>): Report {
     notes: row.notes ? String(row.notes) : undefined,
     reporter: row.reporter ? String(row.reporter) : undefined,
     photo_urls: Array.isArray(row.photo_urls) ? (row.photo_urls as string[]) : [],
+    pending: row.pending === true ? true : undefined,
   }
+}
+
+/**
+ * Turns a queued `create`-type outbox entry into a renderable `Report` so it
+ * can be shown in the grid before it has synced. Merges any photos that have
+ * already finished uploading (`uploadedPhotoUrls`) with whatever URLs were
+ * already in the payload, and tags the result `pending: true`.
+ */
+export function outboxEntryToReport(entry: OutboxEntry): Report {
+  const payload = entry.payload ?? {}
+  const basePhotoUrls = Array.isArray(payload.photo_urls) ? (payload.photo_urls as string[]) : []
+  return normalizeReport({
+    ...payload,
+    id: entry.id,
+    photo_urls: [...basePhotoUrls, ...(entry.uploadedPhotoUrls ?? [])],
+    pending: true,
+  })
+}
+
+/**
+ * Merges server-confirmed `reports` with pending (queued, not-yet-synced)
+ * `create`-type outbox entries for grid rendering. Pending entries never
+ * override a report that's already confirmed (defensive dedup by id — in
+ * practice an entry is discarded from the outbox as soon as its POST
+ * succeeds, so the same id shouldn't be in both lists, but we guard anyway).
+ */
+export function mergeWithPendingReports(reports: Report[], outboxEntries: OutboxEntry[]): Report[] {
+  const confirmedIds = new Set(reports.map((r) => r.id))
+  const pending = outboxEntries
+    .filter((e) => e.op === 'create' && !confirmedIds.has(e.id))
+    .map(outboxEntryToReport)
+  return [...pending, ...reports]
+}
+
+/**
+ * Persist the raw rows from a successful `GET /api/reports` fetch under a
+ * single well-known key (`'latest'`) so a future cold-start-offline load has
+ * something to render instead of a blank grid. Overwrites whatever was
+ * cached before; no history or per-entry expiration is kept.
+ */
+export async function cacheReports(rows: Record<string, unknown>[]): Promise<void> {
+  await db.reportsCache.put({ id: 'latest', rows, fetchedAt: Date.now() })
+}
+
+/**
+ * Read back the last-cached `/api/reports` rows, or `null` if nothing has
+ * been cached yet (e.g. very first launch, never been online).
+ */
+export async function getCachedReports(): Promise<Record<string, unknown>[] | null> {
+  const cached = await db.reportsCache.get('latest')
+  return cached?.rows ?? null
 }

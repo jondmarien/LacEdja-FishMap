@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react'
 import { DownloadSimple, MapPin, PencilSimple, Trash, X } from '@phosphor-icons/react'
 import type { Report } from '../lib/reports'
 import { downloadImage, photoFilename } from '../lib/download'
+import PendingBadge from './PendingBadge'
 
 interface CatchDetailProps {
   report: Report
@@ -48,9 +49,12 @@ export default function CatchDetail({
     <div ref={ref} popover="auto" className="edja-detail" aria-label="Catch details">
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
-            {report.species || 'Unknown catch'}
-          </h2>
+          <div className="flex items-center gap-2">
+            <h2 className="text-xl font-semibold text-slate-900 dark:text-slate-100">
+              {report.species || 'Unknown catch'}
+            </h2>
+            {report.pending && <PendingBadge />}
+          </div>
           <div className="mt-0.5 text-sm text-slate-500 dark:text-slate-400">
             {report.date}
             {report.time ? ` · ${report.time}` : ''}

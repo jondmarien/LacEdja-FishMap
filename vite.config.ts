@@ -8,6 +8,9 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
+      strategies: 'injectManifest',
+      srcDir: 'src',
+      filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: false, // we call registerSW() ourselves in main.tsx
       includeAssets: ['favicon.svg'],
@@ -24,26 +27,6 @@ export default defineConfig({
             sizes: 'any',
             type: 'image/svg+xml',
             purpose: 'any maskable',
-          },
-        ],
-      },
-      workbox: {
-        // Don't serve the SPA shell for /api/* navigations (e.g. opening a
-        // photo via /api/photo in a new tab) — let them hit the network.
-        navigateFallbackDenylist: [/^\/api\//],
-        runtimeCaching: [
-          {
-            // Esri World Imagery basemap tiles
-            urlPattern: /^https:\/\/server\.arcgisonline\.com\/.*/,
-            handler: 'CacheFirst',
-            options: {
-              cacheName: 'basemap-tiles',
-              expiration: {
-                maxEntries: 500,
-                maxAgeSeconds: 60 * 60 * 24 * 30,
-              },
-              cacheableResponse: { statuses: [0, 200] },
-            },
           },
         ],
       },

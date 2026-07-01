@@ -3,6 +3,8 @@ import { Camera, Crosshair, ImageSquare, X } from '@phosphor-icons/react'
 import { logger } from '../lib/logger'
 import type { Season } from './SeasonSelector'
 import type { Report } from '../lib/reports'
+import { enqueueCreate, enqueuePatch } from '../lib/outbox'
+import { registerBackgroundSync } from '../lib/sync'
 
 interface ReportFormProps {
   lat: number
@@ -93,8 +95,23 @@ async function processImage(file: File): Promise<File> {
   return new File([blob], `${base}.jpg`, { type: 'image/jpeg' })
 }
 
-async function uploadPhoto(file: File): Promise<string> {
-  const processed = await processImage(file)
+/** True when `err` looks like a network-level failure (fetch threw before a
+ * Response existed — offline, DNS failure, connection reset, etc.) rather
+ * than a reachable server responding with a 4xx/5xx. We can't inspect the
+ * thrown error's type reliably across browsers (it's usually a `TypeError`
+ * with message "Failed to fetch" / "NetworkError..."), so we rely on the
+ * convention used throughout this file: HTTP-status failures are thrown as
+ * `Error('HTTP ...')` / `Error('Upload failed (HTTP ...)')` explicitly by our
+ * own code, and anything else reaching the catch block is a network error. */
+function isHttpStatusError(err: unknown): boolean {
+  return err instanceof Error && /HTTP \d/.test(err.message)
+}
+
+/** Uploads an already-processed (resized/re-encoded) photo Blob to
+ * `/api/upload`. Throws `Error('Upload failed (HTTP ...)')` for a
+ * reachable-but-rejecting response, or lets the raw fetch failure (network
+ * error) propagate untouched so callers can distinguish the two. */
+async function uploadProcessedPhoto(processed: File): Promise<string> {
   // Send the image as the raw request body (the Vercel Node handler reads it
   // via arrayBuffer(); multipart/form-data isn't reliably parsed there).
   const res = await fetch(`/api/upload?filename=${encodeURIComponent(processed.name)}`, {
@@ -141,6 +158,8 @@ export default function ReportForm({
   const [uploading, setUploading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [uploadError, setUploadError] = useState<string | null>(null)
+  const [submitError, setSubmitError] = useState<string | null>(null)
+  const [outboxFullError, setOutboxFullError] = useState<string | null>(null)
   const [coords, setCoords] = useState({
     lat: report?.lat ?? lat,
     lng: report?.lng ?? lng,
@@ -186,6 +205,8 @@ export default function ReportForm({
     e.preventDefault()
     setSubmitting(true)
     setUploadError(null)
+    setSubmitError(null)
+    setOutboxFullError(null)
 
     // Remember the reporter name on this device for next time.
     try {
@@ -194,29 +215,81 @@ export default function ReportForm({
       // ignore storage failures (private mode, etc.)
     }
 
-    let photoUrls: string[] = report?.photo_urls ? [...report.photo_urls] : []
+    // Photo processing (HEIC decode, resize, JPEG re-encode) is purely local —
+    // it never touches the network — so it always runs regardless of
+    // online/offline. We need processed Blobs either way: to upload now, or
+    // to hand to enqueueCreate for upload during a later flush.
+    let processedPhotos: File[]
+    try {
+      processedPhotos = await Promise.all(photos.map((raw) => processImage(raw)))
+    } catch (err) {
+      logger.error('Photo processing failed', { error: String(err) })
+      setUploadError(
+        'One of your photos could not be processed. You can remove it and save, or try again.',
+      )
+      setSubmitting(false)
+      return
+    }
 
-    if (photos.length > 0) {
+    let photoUrls: string[] = report?.photo_urls ? [...report.photo_urls] : []
+    // Any processed photo that hasn't been uploaded yet (because we hit a
+    // network error, or because a prior photo in the batch already did) gets
+    // handed to enqueueCreate as a pendingPhoto so a later flush can upload it.
+    let pendingPhotoBlobs: File[] = []
+    let uploadNetworkError = false
+
+    if (processedPhotos.length > 0) {
       setUploading(true)
-      try {
-        const uploaded = await Promise.all(photos.map((raw) => uploadPhoto(raw)))
-        photoUrls = [...photoUrls, ...uploaded]
-        logger.info('Photos uploaded', { count: uploaded.length })
-      } catch (err) {
-        // Surface the failure instead of silently saving without photos.
-        logger.error('Photo upload failed', { error: String(err) })
-        setUploadError(
-          'Photos could not be uploaded (they may be too large or the network dropped). You can remove them and save, or try again.',
-        )
-        setUploading(false)
-        setSubmitting(false)
-        return
+      const uploaded: string[] = []
+      for (const processed of processedPhotos) {
+        try {
+          const url = await uploadProcessedPhoto(processed)
+          uploaded.push(url)
+        } catch (err) {
+          if (isHttpStatusError(err)) {
+            // Reachable server, real rejection (too large, server error) —
+            // this is a genuine failure, not an offline signal. Don't queue.
+            logger.error('Photo upload failed (HTTP)', { error: String(err) })
+            setUploadError(
+              'Photos could not be uploaded (they may be too large). You can remove them and save, or try again.',
+            )
+            setUploading(false)
+            setSubmitting(false)
+            return
+          }
+          // Network error: the device is likely offline. This photo (and any
+          // remaining ones we haven't attempted yet) go into the outbox as
+          // pendingPhotos instead of being uploaded now. We keep it simple:
+          // the common case is the whole batch failing together because the
+          // device just went offline, so on the first network error we stop
+          // attempting further uploads and queue everything not-yet-uploaded.
+          logger.warn('Photo upload hit a network error, queuing for later', {
+            error: String(err),
+          })
+          uploadNetworkError = true
+          break
+        }
       }
       setUploading(false)
+
+      if (uploadNetworkError) {
+        const uploadedCount = uploaded.length
+        pendingPhotoBlobs = processedPhotos.slice(uploadedCount)
+        photoUrls = [...photoUrls, ...uploaded]
+      } else {
+        photoUrls = [...photoUrls, ...uploaded]
+        logger.info('Photos uploaded', { count: uploaded.length })
+      }
     }
+
+    // Generate the id once for a create (edits already have report.id) so the
+    // same id is used both in the POST body and in the outbox entry below if
+    // the request fails.
+    const clientId = !isEditing ? crypto.randomUUID() : undefined
 
     const reportPayload = {
       ...form,
+      ...(clientId ? { id: clientId } : {}),
       reporter: form.reporter.trim() || null,
       lat: coords.lat,
       lng: coords.lng,
@@ -227,32 +300,134 @@ export default function ReportForm({
       photo_urls: photoUrls,
     }
 
-    try {
-      const url =
-        isEditing && report ? `/api/reports?id=${encodeURIComponent(report.id)}` : '/api/reports'
-      const res = await fetch(url, {
-        method: isEditing ? 'PATCH' : 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...(isEditing && editToken ? { 'x-edit-token': editToken } : {}),
-        },
-        body: JSON.stringify(reportPayload),
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    // Edit path (Task 6.1): route through the outbox on a genuine network
+    // error (fetch itself throws — no Response at all), matching the
+    // create path's network-vs-HTTP-error split. A reachable-but-rejecting
+    // response (wrong edit token, already deleted, validation failure) is a
+    // real error and must NOT be queued — retrying it would just burn
+    // outbox attempts on something that was never going to succeed.
+    if (isEditing) {
+      // uploadNetworkError already tells us we went offline mid-photo-batch —
+      // route straight to the outbox without attempting the PATCH.
+      if (uploadNetworkError) {
+        await queueEditViaOutbox(reportPayload, pendingPhotoBlobs)
+        setSubmitting(false)
+        return
+      }
+
+      let res: Response
+      try {
+        const url = `/api/reports?id=${encodeURIComponent(report!.id)}`
+        res = await fetch(url, {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            ...(editToken ? { 'x-edit-token': editToken } : {}),
+          },
+          body: JSON.stringify(reportPayload),
+        })
+      } catch (err) {
+        // Network error: no Response at all — queue via the outbox.
+        logger.warn('Report edit hit a network error, queuing for later', {
+          error: String(err),
+        })
+        await queueEditViaOutbox(reportPayload, pendingPhotoBlobs)
+        setSubmitting(false)
+        return
+      }
+
+      if (!res.ok) {
+        // Reachable server, real rejection — do not queue; surface the error.
+        logger.error('Report edit rejected by server', { status: res.status })
+        setSubmitError('The changes could not be saved. Please check the details and try again.')
+        setSubmitting(false)
+        return
+      }
+
       const savedReport = await res.json()
-      logger.info(isEditing ? 'Report updated' : 'Report created', {
-        id: savedReport.id,
-        species: savedReport.species,
-      })
+      logger.info('Report updated', { id: savedReport.id, species: savedReport.species })
       onSubmit(savedReport)
-    } catch (err) {
-      // API unavailable (e.g. local dev without a DB) — keep the catch locally
-      // so the user never loses their entry.
-      logger.error('Report submission failed, keeping locally', { error: String(err) })
-      onSubmit({ ...reportPayload, id: report?.id ?? crypto.randomUUID() })
+      setSubmitting(false)
+      onClose()
+      return
     }
 
-    setSubmitting(false)
+    // uploadNetworkError already tells us we went offline mid-photo-batch —
+    // route straight to the outbox without attempting the POST (it would
+    // just fail the same way).
+    if (uploadNetworkError) {
+      await queueViaOutbox(reportPayload, pendingPhotoBlobs)
+      setSubmitting(false)
+      return
+    }
+
+    try {
+      const res = await fetch('/api/reports', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(reportPayload),
+      })
+      if (!res.ok) {
+        // Reachable server, real rejection — a genuine validation/server
+        // failure, not an offline signal. Do not queue; surface the error.
+        logger.error('Report creation rejected by server', { status: res.status })
+        setSubmitError('The catch could not be saved. Please check the details and try again.')
+        setSubmitting(false)
+        return
+      }
+      const savedReport = await res.json()
+      logger.info('Report created', { id: savedReport.id, species: savedReport.species })
+      onSubmit(savedReport)
+      setSubmitting(false)
+      onClose()
+    } catch (err) {
+      // Network error reaching /api/reports — queue via the outbox.
+      logger.warn('Report creation hit a network error, queuing for later', {
+        error: String(err),
+      })
+      await queueViaOutbox(reportPayload, pendingPhotoBlobs)
+      setSubmitting(false)
+    }
+  }
+
+  /** Enqueues a create in the offline outbox, wires up onSubmit for optimistic
+   * local state, and kicks off a Background Sync registration so the flush
+   * engine gets triggered as soon as connectivity returns. Handles the
+   * outbox_full cap by surfacing a message instead of silently dropping the
+   * submission. */
+  const queueViaOutbox = async (
+    reportPayload: Record<string, unknown>,
+    pendingPhotoBlobs: File[],
+  ) => {
+    const result = await enqueueCreate(reportPayload, pendingPhotoBlobs)
+    if (!result.ok) {
+      setOutboxFullError(
+        'Your offline queue is full (15 catches). Sync when you’re back online, or discard a queued entry, before adding more.',
+      )
+      return
+    }
+    logger.info('Report queued in outbox', { id: result.id })
+    // Fire-and-forget: ask the browser to replay the outbox once
+    // connectivity returns. Not all browsers support Background Sync; the
+    // outbox hook's other triggers (load/online/visibility/interval) cover
+    // the rest.
+    void registerBackgroundSync()
+    onSubmit({ ...reportPayload, id: result.id })
+    onClose()
+  }
+
+  /** Enqueues a patch in the offline outbox for an existing (already-synced)
+   * catch, kicks off Background Sync, and optimistically applies the edited
+   * values locally (via onSubmit) so the user's edit doesn't appear to
+   * vanish while queued — see Task 6.1 design notes. */
+  const queueEditViaOutbox = async (
+    reportPayload: Record<string, unknown>,
+    pendingPhotoBlobs: File[],
+  ) => {
+    await enqueuePatch(report!.id, editToken!, reportPayload, pendingPhotoBlobs)
+    logger.info('Report edit queued in outbox', { id: report!.id })
+    void registerBackgroundSync()
+    onSubmit({ ...reportPayload, id: report!.id })
     onClose()
   }
 
@@ -493,6 +668,18 @@ export default function ReportForm({
               </div>
             )}
           </div>
+
+          {submitError && (
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              {submitError}
+            </div>
+          )}
+
+          {outboxFullError && (
+            <div className="rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700 dark:bg-amber-500/10 dark:text-amber-300">
+              {outboxFullError}
+            </div>
+          )}
 
           <div className="flex gap-3 pt-1">
             <button

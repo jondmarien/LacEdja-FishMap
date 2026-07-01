@@ -1,5 +1,17 @@
-import { describe, it, expect } from 'vitest'
-import { normalizeReport } from './reports'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  normalizeReport,
+  outboxEntryToReport,
+  mergeWithPendingReports,
+  cacheReports,
+  getCachedReports,
+} from './reports'
+import { db } from './db'
+import type { OutboxEntry } from './db'
+
+beforeEach(async () => {
+  await db.reportsCache.clear()
+})
 
 describe('normalizeReport', () => {
   it('maps a Postgres row (season_tag, string numerics, ISO date/time) to a Report', () => {
@@ -69,5 +81,97 @@ describe('normalizeReport', () => {
 
     expect(r.length_cm).toBeUndefined()
     expect(r.weight_kg).toBeUndefined()
+  })
+})
+
+function makeCreateEntry(overrides: Partial<OutboxEntry> = {}): OutboxEntry {
+  return {
+    id: 'entry-1',
+    op: 'create',
+    status: 'pending',
+    payload: { species: 'Pike', date: '2026-07-01', lat: 46.1, lng: -76.0, season: 'Summer' },
+    attempts: 0,
+    createdAt: Date.now(),
+    ...overrides,
+  }
+}
+
+describe('outboxEntryToReport', () => {
+  it('marks the resulting report as pending', () => {
+    const r = outboxEntryToReport(makeCreateEntry())
+    expect(r.pending).toBe(true)
+    expect(r.id).toBe('entry-1')
+    expect(r.species).toBe('Pike')
+  })
+
+  it('merges already-uploaded photo urls with any in the payload', () => {
+    const r = outboxEntryToReport(
+      makeCreateEntry({
+        payload: {
+          species: 'Bass',
+          date: '2026-07-01',
+          lat: 46,
+          lng: -76,
+          photo_urls: ['https://example.com/pre.jpg'],
+        },
+        uploadedPhotoUrls: ['https://example.com/new.jpg'],
+      }),
+    )
+
+    expect(r.photo_urls).toEqual(['https://example.com/pre.jpg', 'https://example.com/new.jpg'])
+  })
+
+  it('handles a missing payload gracefully', () => {
+    const r = outboxEntryToReport(makeCreateEntry({ payload: undefined }))
+    expect(r.pending).toBe(true)
+    expect(r.photo_urls).toEqual([])
+  })
+})
+
+describe('mergeWithPendingReports', () => {
+  it('places pending outbox-derived reports ahead of confirmed reports', () => {
+    const confirmed = normalizeReport({ id: 'r1', species: 'Trout', date: '2026-07-01', lat: 46, lng: -76 })
+    const entry = makeCreateEntry({ id: 'entry-2' })
+
+    const merged = mergeWithPendingReports([confirmed], [entry])
+
+    expect(merged.map((r) => r.id)).toEqual(['entry-2', 'r1'])
+    expect(merged[0].pending).toBe(true)
+  })
+
+  it('ignores non-create outbox entries', () => {
+    const patchEntry = makeCreateEntry({ id: 'entry-3', op: 'patch', editToken: 'tok' })
+    const merged = mergeWithPendingReports([], [patchEntry])
+    expect(merged).toEqual([])
+  })
+
+  it('does not duplicate a report whose outbox entry id already matches a confirmed report', () => {
+    const confirmed = normalizeReport({ id: 'same-id', species: 'Perch', date: '2026-07-01', lat: 46, lng: -76 })
+    const entry = makeCreateEntry({ id: 'same-id' })
+
+    const merged = mergeWithPendingReports([confirmed], [entry])
+
+    expect(merged).toHaveLength(1)
+    expect(merged[0].pending).toBeUndefined()
+  })
+})
+
+describe('cacheReports / getCachedReports', () => {
+  it('returns null when nothing has been cached yet', async () => {
+    expect(await getCachedReports()).toBeNull()
+  })
+
+  it('round-trips cached rows', async () => {
+    const rows = [{ id: 'r1', species: 'Bass', date: '2026-07-01', lat: 46, lng: -76 }]
+    await cacheReports(rows)
+
+    expect(await getCachedReports()).toEqual(rows)
+  })
+
+  it('overwrites the previous cache on subsequent calls', async () => {
+    await cacheReports([{ id: 'old' }])
+    await cacheReports([{ id: 'new' }])
+
+    expect(await getCachedReports()).toEqual([{ id: 'new' }])
   })
 })

@@ -7,8 +7,21 @@ import CatchDetail from './components/CatchDetail'
 import ConfirmDialog from './components/ConfirmDialog'
 import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
-import { normalizeReport, type Report } from './lib/reports'
+import DownloadOfflineButton from './components/DownloadOfflineButton'
+import {
+  normalizeReport,
+  mergeWithPendingReports,
+  cacheReports,
+  getCachedReports,
+  type Report,
+} from './lib/reports'
 import { logger } from './lib/logger'
+import { useOutboxSync } from './hooks/useOutboxSync'
+import { getOutboxEntries, enqueueDelete, resetForRetry, discardEntry } from './lib/outbox'
+import { registerBackgroundSync, flushOutbox } from './lib/sync'
+import type { OutboxEntry } from './lib/db'
+import PendingBadge from './components/PendingBadge'
+import OutboxFailedBanner from './components/OutboxFailedBanner'
 
 // MapLibre is ~1 MB; load it on demand so the rest of the page paints first.
 const LacEdjaMap = lazy(() => import('./components/LacEdjaMap'))
@@ -40,30 +53,72 @@ export default function App() {
   const [editing, setEditing] = useState<{ report: Report; token: string } | null>(null)
   const [detail, setDetail] = useState<Report | null>(null)
   const [confirmDelete, setConfirmDelete] = useState<Report | null>(null)
+  const [confirmDiscardId, setConfirmDiscardId] = useState<string | null>(null)
   const [toast, setToast] = useState<string | null>(null)
   const [terrain3d, setTerrain3d] = useState(false) // 3D terrain off by default
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
+  const [outboxEntries, setOutboxEntries] = useState<OutboxEntry[]>([])
 
-  // Load existing catches from the API on first mount.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch('/api/reports')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const rows = await res.json()
-        if (cancelled || !Array.isArray(rows)) return
-        setReports(rows.map(normalizeReport))
-        logger.info('Reports loaded', { count: rows.length })
-      } catch (err) {
-        logger.warn('Could not load reports from API', { error: String(err) })
+  // Fallback outbox flush triggers (online / visibility / interval), in
+  // addition to Background Sync registered elsewhere.
+  useOutboxSync()
+
+  const loadReports = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reports')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const rows = await res.json()
+      if (!Array.isArray(rows)) return
+      const fetched = rows.map(normalizeReport)
+      // Merge rather than replace: a background flush may have just synced a
+      // catch that was rendered as "pending" a moment ago, so we want the
+      // now-confirmed row to take its place, while not clobbering anything
+      // else already in local state.
+      setReports((prev) => {
+        const fetchedIds = new Set(fetched.map((r) => r.id))
+        const keepLocal = prev.filter((r) => !fetchedIds.has(r.id))
+        return [...fetched, ...keepLocal]
+      })
+      logger.info('Reports loaded', { count: rows.length })
+      cacheReports(rows).catch((err) => {
+        logger.warn('Could not cache reports for offline fallback', { error: String(err) })
+      })
+    } catch (err) {
+      logger.warn('Could not load reports from API', { error: String(err) })
+      // Cold-start-offline (or any fetch failure): fall back to the last
+      // successful fetch's rows so the grid isn't left blank. Merges the
+      // same way a live fetch would, which on a true cold start (reports
+      // still []) just populates `reports` directly.
+      const cached = await getCachedReports()
+      if (cached) {
+        const fetched = cached.map(normalizeReport)
+        setReports((prev) => {
+          const fetchedIds = new Set(fetched.map((r) => r.id))
+          const keepLocal = prev.filter((r) => !fetchedIds.has(r.id))
+          return [...fetched, ...keepLocal]
+        })
       }
-    })()
-    return () => {
-      cancelled = true
     }
   }, [])
+
+  // Load existing catches from the API on first mount, and poll the outbox
+  // for `create`-type entries so unsynced catches can be rendered
+  // optimistically with a "Pending sync" badge. Re-polls whenever the flush
+  // engine mutates the outbox (see src/lib/sync.ts's `notifyOutboxChanged`),
+  // and also re-fetches /api/reports on that same signal: once a flush
+  // succeeds the outbox entry disappears, and without a re-fetch here the
+  // now-synced catch would just vanish from the grid until the next full
+  // page load instead of reappearing as a normal (non-pending) card.
+  useEffect(() => {
+    const refresh = () => {
+      void getOutboxEntries().then(setOutboxEntries)
+      void loadReports()
+    }
+    refresh()
+    window.addEventListener('outbox:changed', refresh)
+    return () => window.removeEventListener('outbox:changed', refresh)
+  }, [loadReports])
 
   useEffect(() => {
     if (!toast) return
@@ -71,10 +126,33 @@ export default function App() {
     return () => clearTimeout(t)
   }, [toast])
 
-  const filteredReports = useMemo(
-    () => reports.filter((r) => r.season === season),
-    [reports, season],
+  const reportsWithPending = useMemo(
+    () => mergeWithPendingReports(reports, outboxEntries),
+    [reports, outboxEntries],
   )
+
+  const filteredReports = useMemo(
+    () => reportsWithPending.filter((r) => r.season === season),
+    [reportsWithPending, season],
+  )
+
+  const failedEntries = useMemo(
+    () => outboxEntries.filter((e) => e.status === 'failed'),
+    [outboxEntries],
+  )
+
+  const handleRetry = useCallback((id: string) => {
+    void resetForRetry(id).then(() => {
+      void getOutboxEntries().then(setOutboxEntries)
+      // Fire-and-forget: kick off a flush immediately rather than waiting
+      // for the next automatic trigger (online event, poll interval, etc).
+      void flushOutbox()
+    })
+  }, [])
+
+  const handleDiscardClick = useCallback((id: string) => {
+    setConfirmDiscardId(id)
+  }, [])
 
   const markers = useMemo(
     () =>
@@ -104,9 +182,9 @@ export default function App() {
 
   const handleMarkerClick = useCallback(
     (id: string) => {
-      setDetail(reports.find((r) => r.id === id) ?? null)
+      setDetail(reportsWithPending.find((r) => r.id === id) ?? null)
     },
-    [reports],
+    [reportsWithPending],
   )
 
   const handleAddCatch = () => {
@@ -144,18 +222,41 @@ export default function App() {
   const performDelete = async (report: Report) => {
     const token = tokens[report.id]
     if (!token) return
+
+    // Split the network-throw case (fetch itself throws — no Response at
+    // all) from a reachable-but-rejecting response (e.g. 404 for a wrong
+    // edit token or an already-deleted catch). Only the former is queued
+    // into the outbox; the latter is a genuine failure that retrying would
+    // never fix, so it surfaces immediately as an error instead.
+    let res: Response
     try {
-      const res = await fetch(`/api/reports?id=${encodeURIComponent(report.id)}`, {
+      res = await fetch(`/api/reports?id=${encodeURIComponent(report.id)}`, {
         method: 'DELETE',
         headers: { 'x-edit-token': token },
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      logger.info('Report deleted', { id: report.id })
     } catch (err) {
-      logger.error('Delete failed', { error: String(err) })
+      logger.warn('Delete hit a network error, queuing for later', { error: String(err) })
+      await enqueueDelete(report.id, token)
+      void registerBackgroundSync()
+      // Optimistic removal: from the user's perspective the delete is
+      // queued and will complete once connectivity returns, so leaving the
+      // catch visible would be confusing.
+      setReports((prev) => prev.filter((r) => r.id !== report.id))
+      const next = { ...tokens }
+      delete next[report.id]
+      setTokens(next)
+      writeTokens(next)
+      setToast('You are offline — the delete will complete once you reconnect.')
+      return
+    }
+
+    if (!res.ok) {
+      logger.error('Delete rejected by server', { status: res.status })
       setToast('Could not delete the catch. Please try again.')
       return
     }
+
+    logger.info('Report deleted', { id: report.id })
     setReports((prev) => prev.filter((r) => r.id !== report.id))
     const next = { ...tokens }
     delete next[report.id]
@@ -197,6 +298,14 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-6xl px-4 pb-24 sm:px-6 lg:px-8">
+        <div className="pt-6">
+          <OutboxFailedBanner
+            entries={failedEntries}
+            onRetry={handleRetry}
+            onDiscard={handleDiscardClick}
+          />
+        </div>
+
         {/* Hero */}
         <section className="animate-rise pt-10 pb-8 sm:pt-14">
           <div className="flex items-center gap-2 text-sm font-medium text-lake-700 dark:text-lake-300">
@@ -246,6 +355,7 @@ export default function App() {
                 3D
               </button>
               <SeasonSelector value={season} onChange={setSeason} />
+              <DownloadOfflineButton />
             </div>
           </div>
 
@@ -375,11 +485,14 @@ export default function App() {
                           </span>
                         ) : null}
                       </div>
-                      {canManage && (
-                        <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700 dark:text-reed-400">
-                          Yours
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {canManage && (
+                          <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700 dark:text-reed-400">
+                            Yours
+                          </span>
+                        )}
+                        {report.pending && <PendingBadge />}
+                      </div>
                     </div>
                   </article>
                 )
@@ -458,6 +571,23 @@ export default function App() {
             void performDelete(r)
           }}
           onCancel={() => setConfirmDelete(null)}
+        />
+      )}
+
+      {confirmDiscardId && (
+        <ConfirmDialog
+          title="Discard this failed entry?"
+          message="This queued change will be permanently removed and will not be retried. This cannot be undone."
+          confirmLabel="Discard"
+          danger
+          onConfirm={() => {
+            const id = confirmDiscardId
+            setConfirmDiscardId(null)
+            void discardEntry(id).then(() => {
+              void getOutboxEntries().then(setOutboxEntries)
+            })
+          }}
+          onCancel={() => setConfirmDiscardId(null)}
         />
       )}
 
