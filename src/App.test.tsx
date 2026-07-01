@@ -3,6 +3,8 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import App from './App'
 import { enqueueDelete } from './lib/outbox'
 import { registerBackgroundSync } from './lib/sync'
+import { cacheReports } from './lib/reports'
+import { db } from './lib/db'
 
 vi.mock('./lib/outbox', async () => {
   const actual = await vi.importActual<typeof import('./lib/outbox')>('./lib/outbox')
@@ -148,5 +150,45 @@ describe('App: performDelete', () => {
     )
     expect(mockEnqueueDelete).not.toHaveBeenCalled()
     expect(screen.getByText('Bass')).toBeInTheDocument()
+  })
+})
+
+describe('App: cold-start-offline reports fallback', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks()
+    await db.reportsCache.clear()
+    if (!HTMLElement.prototype.showPopover) {
+      HTMLElement.prototype.showPopover = vi.fn()
+      HTMLElement.prototype.hidePopover = vi.fn()
+    }
+    vi.stubGlobal('localStorage', makeMemoryStorage())
+    vi.stubGlobal(
+      'matchMedia',
+      vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    )
+  })
+
+  afterEach(async () => {
+    vi.unstubAllGlobals()
+    await db.reportsCache.clear()
+  })
+
+  it('renders last-known cached reports when the initial GET fails', async () => {
+    await cacheReports([REPORT])
+
+    vi.stubGlobal('fetch', vi.fn(() => Promise.reject(new Error('offline'))))
+
+    render(<App />)
+
+    await waitFor(() => expect(screen.getByText('Bass')).toBeInTheDocument())
   })
 })

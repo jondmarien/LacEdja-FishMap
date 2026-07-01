@@ -7,7 +7,13 @@ import CatchDetail from './components/CatchDetail'
 import ConfirmDialog from './components/ConfirmDialog'
 import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
-import { normalizeReport, mergeWithPendingReports, type Report } from './lib/reports'
+import {
+  normalizeReport,
+  mergeWithPendingReports,
+  cacheReports,
+  getCachedReports,
+  type Report,
+} from './lib/reports'
 import { logger } from './lib/logger'
 import { useOutboxSync } from './hooks/useOutboxSync'
 import { getOutboxEntries, enqueueDelete, resetForRetry, discardEntry } from './lib/outbox'
@@ -74,8 +80,24 @@ export default function App() {
         return [...fetched, ...keepLocal]
       })
       logger.info('Reports loaded', { count: rows.length })
+      cacheReports(rows).catch((err) => {
+        logger.warn('Could not cache reports for offline fallback', { error: String(err) })
+      })
     } catch (err) {
       logger.warn('Could not load reports from API', { error: String(err) })
+      // Cold-start-offline (or any fetch failure): fall back to the last
+      // successful fetch's rows so the grid isn't left blank. Merges the
+      // same way a live fetch would, which on a true cold start (reports
+      // still []) just populates `reports` directly.
+      const cached = await getCachedReports()
+      if (cached) {
+        const fetched = cached.map(normalizeReport)
+        setReports((prev) => {
+          const fetchedIds = new Set(fetched.map((r) => r.id))
+          const keepLocal = prev.filter((r) => !fetchedIds.has(r.id))
+          return [...fetched, ...keepLocal]
+        })
+      }
     }
   }, [])
 

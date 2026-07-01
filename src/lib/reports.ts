@@ -1,5 +1,5 @@
 import type { Season } from '../components/SeasonSelector'
-import type { OutboxEntry } from './db'
+import { db, type OutboxEntry } from './db'
 
 /**
  * Canonical client-side shape for a catch report. The database stores the
@@ -92,4 +92,23 @@ export function mergeWithPendingReports(reports: Report[], outboxEntries: Outbox
     .filter((e) => e.op === 'create' && !confirmedIds.has(e.id))
     .map(outboxEntryToReport)
   return [...pending, ...reports]
+}
+
+/**
+ * Persist the raw rows from a successful `GET /api/reports` fetch under a
+ * single well-known key (`'latest'`) so a future cold-start-offline load has
+ * something to render instead of a blank grid. Overwrites whatever was
+ * cached before; no history or per-entry expiration is kept.
+ */
+export async function cacheReports(rows: Record<string, unknown>[]): Promise<void> {
+  await db.reportsCache.put({ id: 'latest', rows, fetchedAt: Date.now() })
+}
+
+/**
+ * Read back the last-cached `/api/reports` rows, or `null` if nothing has
+ * been cached yet (e.g. very first launch, never been online).
+ */
+export async function getCachedReports(): Promise<Record<string, unknown>[] | null> {
+  const cached = await db.reportsCache.get('latest')
+  return cached?.rows ?? null
 }

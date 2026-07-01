@@ -1,6 +1,17 @@
-import { describe, it, expect } from 'vitest'
-import { normalizeReport, outboxEntryToReport, mergeWithPendingReports } from './reports'
+import { describe, it, expect, beforeEach } from 'vitest'
+import {
+  normalizeReport,
+  outboxEntryToReport,
+  mergeWithPendingReports,
+  cacheReports,
+  getCachedReports,
+} from './reports'
+import { db } from './db'
 import type { OutboxEntry } from './db'
+
+beforeEach(async () => {
+  await db.reportsCache.clear()
+})
 
 describe('normalizeReport', () => {
   it('maps a Postgres row (season_tag, string numerics, ISO date/time) to a Report', () => {
@@ -142,5 +153,25 @@ describe('mergeWithPendingReports', () => {
 
     expect(merged).toHaveLength(1)
     expect(merged[0].pending).toBeUndefined()
+  })
+})
+
+describe('cacheReports / getCachedReports', () => {
+  it('returns null when nothing has been cached yet', async () => {
+    expect(await getCachedReports()).toBeNull()
+  })
+
+  it('round-trips cached rows', async () => {
+    const rows = [{ id: 'r1', species: 'Bass', date: '2026-07-01', lat: 46, lng: -76 }]
+    await cacheReports(rows)
+
+    expect(await getCachedReports()).toEqual(rows)
+  })
+
+  it('overwrites the previous cache on subsequent calls', async () => {
+    await cacheReports([{ id: 'old' }])
+    await cacheReports([{ id: 'new' }])
+
+    expect(await getCachedReports()).toEqual([{ id: 'new' }])
   })
 })
