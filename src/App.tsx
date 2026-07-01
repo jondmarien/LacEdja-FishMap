@@ -9,6 +9,7 @@ import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
 import { normalizeReport, type Report } from './lib/reports'
 import { logger } from './lib/logger'
+import { useOutboxSync } from './hooks/useOutboxSync'
 
 // MapLibre is ~1 MB; load it on demand so the rest of the page paints first.
 const LacEdjaMap = lazy(() => import('./components/LacEdjaMap'))
@@ -44,6 +45,10 @@ export default function App() {
   const [terrain3d, setTerrain3d] = useState(false) // 3D terrain off by default
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
+
+  // Fallback outbox flush triggers (online / visibility / interval), in
+  // addition to Background Sync registered elsewhere.
+  useOutboxSync()
 
   // Load existing catches from the API on first mount.
   useEffect(() => {

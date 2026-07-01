@@ -119,3 +119,29 @@ export async function countActive(): Promise<number> {
     .anyOf('pending', 'syncing', 'failed')
     .count()
 }
+
+/**
+ * Increments an entry's attempts counter and persists it. Returns the new
+ * count so the flush engine can decide whether to retry or give up, without
+ * needing to touch `db` directly.
+ */
+export async function incrementAttempts(id: string): Promise<number> {
+  const entry = await db.outbox.get(id)
+  const next = (entry?.attempts ?? 0) + 1
+  await db.outbox.update(id, { attempts: next })
+  return next
+}
+
+/**
+ * Records a successfully uploaded photo for an entry: appends `url` to
+ * `uploadedPhotoUrls` and removes one Blob from `pendingPhotos` (the one that
+ * was just uploaded), persisting immediately so partial upload progress
+ * survives a mid-flush crash/reload.
+ */
+export async function recordUploadedPhoto(id: string, url: string): Promise<void> {
+  const entry = await db.outbox.get(id)
+  if (!entry) return
+  const uploadedPhotoUrls = [...(entry.uploadedPhotoUrls ?? []), url]
+  const pendingPhotos = (entry.pendingPhotos ?? []).slice(1)
+  await db.outbox.update(id, { uploadedPhotoUrls, pendingPhotos })
+}
