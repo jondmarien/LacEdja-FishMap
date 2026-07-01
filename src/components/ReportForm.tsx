@@ -215,8 +215,14 @@ export default function ReportForm({
       setUploading(false)
     }
 
+    // Generate the id once for a create (edits already have report.id) so the
+    // same id is used both in the POST body and in the local-fallback path
+    // below if the request fails.
+    const clientId = !isEditing ? crypto.randomUUID() : undefined
+
     const reportPayload = {
       ...form,
+      ...(clientId ? { id: clientId } : {}),
       reporter: form.reporter.trim() || null,
       lat: coords.lat,
       lng: coords.lng,
@@ -249,7 +255,7 @@ export default function ReportForm({
       // API unavailable (e.g. local dev without a DB) — keep the catch locally
       // so the user never loses their entry.
       logger.error('Report submission failed, keeping locally', { error: String(err) })
-      onSubmit({ ...reportPayload, id: report?.id ?? crypto.randomUUID() })
+      onSubmit({ ...reportPayload, id: report?.id ?? clientId })
     }
 
     setSubmitting(false)

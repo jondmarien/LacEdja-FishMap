@@ -89,19 +89,47 @@ export async function POST(request: Request) {
     season,
   } = body
 
+  // Offline clients generate the id up front so a queued create can be
+  // retried/flushed idempotently. `@vercel/postgres`'s sql`` tag only accepts
+  // Primitive values for interpolation (no nested raw sql`` fragments), so we
+  // generate the UUID here in JS rather than trying to compose
+  // sql`gen_random_uuid()` inside the INSERT — same effective default,
+  // simpler to type.
+  const id = typeof body.id === 'string' ? body.id : crypto.randomUUID()
   const editToken = crypto.randomUUID()
 
   try {
     const { rows } = await sql`
       INSERT INTO reports (
-        date, time, lat, lng, species, length_cm, weight_kg,
+        id, date, time, lat, lng, species, length_cm, weight_kg,
         count, notes, bait, reporter, photo_urls, edit_token, season_tag
       ) VALUES (
-        ${date}, ${time}, ${lat}, ${lng}, ${species}, ${length_cm}, ${weight_kg},
+        ${id}, ${date}, ${time}, ${lat}, ${lng}, ${species}, ${length_cm}, ${weight_kg},
         ${count}, ${notes}, ${bait}, ${reporter}, ${photo_urls}, ${editToken}, ${season}
       )
+      ON CONFLICT (id) DO NOTHING
       RETURNING *
     `
+
+    if (rows.length === 0) {
+      // Conflict no-op: this id was already inserted by an earlier flush
+      // attempt. Re-select the existing row so the response is well-formed.
+      const existing = await sql`SELECT * FROM reports WHERE id = ${id}`
+      if (existing.rows.length === 0) {
+        // Extremely unlikely (row deleted between INSERT and SELECT), but
+        // guard against an empty response body.
+        logger.api('error', 'Report insert conflicted but row not found on re-select', { id })
+        return Response.json({ error: 'Failed to create report' }, { status: 500 })
+      }
+      logger.api('info', 'Report create was a duplicate flush, returning existing row', {
+        id,
+        species,
+      })
+      // 200, not 201: no row was created by this request, an identical one
+      // already existed (idempotent retry of a queued offline create).
+      return Response.json(existing.rows[0], { status: 200 })
+    }
+
     logger.api('info', 'Report created', { id: rows[0].id, species })
     // edit_token IS included here so the creating device can store it.
     return Response.json(rows[0], { status: 201 })

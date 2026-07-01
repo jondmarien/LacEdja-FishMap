@@ -113,6 +113,29 @@ describe('ReportForm', () => {
     expect(mockOnSubmit.mock.calls[0][0].photo_urls).toEqual(['https://blob.example/test.jpg'])
   })
 
+  it('generates a client id for a new catch and reuses it in the local fallback when the POST fails', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<ReportForm {...defaultProps} />)
+
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Walleye' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+
+    // Inspect the POST body sent to /api/reports.
+    const reportsCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/reports'))
+    expect(reportsCall).toBeDefined()
+    const sentBody = JSON.parse(reportsCall![1].body as string)
+    expect(sentBody.id).toBeTruthy()
+
+    const submitted = mockOnSubmit.mock.calls[0][0]
+    expect(submitted.id).toBe(sentBody.id)
+  })
+
   it('calls onClose when cancel is clicked', () => {
     render(<ReportForm {...defaultProps} />)
 
