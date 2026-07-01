@@ -2,9 +2,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import ReportForm from './ReportForm'
 import type { Season } from './SeasonSelector'
+import { enqueueCreate } from '../lib/outbox'
+import { registerBackgroundSync } from '../lib/sync'
+
+vi.mock('../lib/outbox', () => ({
+  enqueueCreate: vi.fn(),
+}))
+
+vi.mock('../lib/sync', () => ({
+  registerBackgroundSync: vi.fn(),
+}))
 
 const mockOnClose = vi.fn()
 const mockOnSubmit = vi.fn()
+const mockEnqueueCreate = enqueueCreate as unknown as ReturnType<typeof vi.fn>
+const mockRegisterBackgroundSync = registerBackgroundSync as unknown as ReturnType<typeof vi.fn>
 
 const defaultProps = {
   lat: 46.18,
@@ -17,7 +29,9 @@ const defaultProps = {
 describe('ReportForm', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    // Default: API unreachable, so the form uses its offline fallback path.
+    mockEnqueueCreate.mockResolvedValue({ ok: true, id: 'outbox-id-1' })
+    mockRegisterBackgroundSync.mockResolvedValue(true)
+    // Default: API unreachable, so the form uses its offline outbox path.
     vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
   })
 
@@ -57,12 +71,16 @@ describe('ReportForm', () => {
 
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
 
+    expect(mockEnqueueCreate).toHaveBeenCalled()
+    const [payload] = mockEnqueueCreate.mock.calls[0]
+    expect(payload.species).toBe('Smallmouth bass')
+    expect(payload.length_cm).toBe(42)
+    expect(payload.season).toBe('Summer')
+    expect(payload.lat).toBe(46.18)
+    expect(payload.lng).toBe(-76.01)
+
     const submitted = mockOnSubmit.mock.calls[0][0]
     expect(submitted.species).toBe('Smallmouth bass')
-    expect(submitted.length_cm).toBe(42)
-    expect(submitted.season).toBe('Summer')
-    expect(submitted.lat).toBe(46.18)
-    expect(submitted.lng).toBe(-76.01)
   })
 
   it('optimizes and uploads selected photos, including their URLs', async () => {
@@ -88,14 +106,17 @@ describe('ReportForm', () => {
     HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
       cb(new Blob(['x'], { type: 'image/jpeg' }))
     }
-    // /api/upload succeeds; /api/reports is offline (exercises the fallback).
+    // Both /api/upload and /api/reports succeed.
     vi.stubGlobal(
       'fetch',
       vi.fn(async (url: string) => {
         if (String(url).includes('/api/upload')) {
           return { ok: true, json: async () => ({ url: 'https://blob.example/test.jpg' }) } as Response
         }
-        throw new Error('offline')
+        return {
+          ok: true,
+          json: async () => ({ id: 'server-id-1', species: 'Pike', photo_urls: ['https://blob.example/test.jpg'] }),
+        } as Response
       }),
     )
 
@@ -111,9 +132,10 @@ describe('ReportForm', () => {
 
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
     expect(mockOnSubmit.mock.calls[0][0].photo_urls).toEqual(['https://blob.example/test.jpg'])
+    expect(mockEnqueueCreate).not.toHaveBeenCalled()
   })
 
-  it('generates a client id for a new catch and reuses it in the local fallback when the POST fails', async () => {
+  it('generates a client id for a new catch and reuses it as the outbox id when the POST hits a network error', async () => {
     const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
     vi.stubGlobal('fetch', fetchMock)
 
@@ -126,14 +148,189 @@ describe('ReportForm', () => {
 
     await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
 
-    // Inspect the POST body sent to /api/reports.
-    const reportsCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/reports'))
-    expect(reportsCall).toBeDefined()
-    const sentBody = JSON.parse(reportsCall![1].body as string)
-    expect(sentBody.id).toBeTruthy()
+    expect(mockEnqueueCreate).toHaveBeenCalled()
+    const [payload, pendingPhotos] = mockEnqueueCreate.mock.calls[0]
+    expect(payload.id).toBeTruthy()
+    expect(pendingPhotos).toEqual([])
+    expect(mockRegisterBackgroundSync).toHaveBeenCalled()
 
     const submitted = mockOnSubmit.mock.calls[0][0]
-    expect(submitted.id).toBe(sentBody.id)
+    expect(submitted.id).toBe('outbox-id-1')
+  })
+
+  it('a network error on /api/reports (no photos) queues via enqueueCreate and calls onSubmit, without any generic upload/local-fallback UI', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    render(<ReportForm {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Crappie' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    expect(mockEnqueueCreate).toHaveBeenCalledTimes(1)
+    expect(screen.queryByText(/could not be uploaded/i)).not.toBeInTheDocument()
+    expect(screen.queryByText(/could not be saved/i)).not.toBeInTheDocument()
+  })
+
+  it('a network error during photo upload still queues the report, with the photo Blob in pendingPhotos', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:stub')
+    URL.revokeObjectURL = vi.fn()
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      configurable: true,
+      set() {
+        Promise.resolve().then(() => this.onload?.(new Event('load')))
+      },
+    })
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as never
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
+      cb(new Blob(['x'], { type: 'image/jpeg' }))
+    }
+    // Photo processing succeeds locally, but the /api/upload network call
+    // fails (offline) — no HTTP response at all.
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    render(<ReportForm {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Perch' },
+    })
+    const file = new File(['x'], 'fish.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText(/photos/i), { target: { files: [file] } })
+
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+    expect(mockEnqueueCreate).toHaveBeenCalledTimes(1)
+    const [, pendingPhotos] = mockEnqueueCreate.mock.calls[0]
+    expect(pendingPhotos).toHaveLength(1)
+    expect(pendingPhotos[0]).toBeInstanceOf(Blob)
+    expect(screen.queryByText(/could not be uploaded/i)).not.toBeInTheDocument()
+  })
+
+  it('a real HTTP error (400) from /api/reports does not call enqueueCreate and shows an error message', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn().mockResolvedValue({ ok: false, status: 400, json: async () => ({}) } as Response),
+    )
+
+    render(<ReportForm {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Bass' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not be saved/i)).toBeInTheDocument(),
+    )
+    expect(mockEnqueueCreate).not.toHaveBeenCalled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it('a real HTTP error (413) from photo upload does not call enqueueCreate and shows the existing upload error message', async () => {
+    URL.createObjectURL = vi.fn(() => 'blob:stub')
+    URL.revokeObjectURL = vi.fn()
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalWidth', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'naturalHeight', {
+      configurable: true,
+      get: () => 100,
+    })
+    Object.defineProperty(HTMLImageElement.prototype, 'src', {
+      configurable: true,
+      set() {
+        Promise.resolve().then(() => this.onload?.(new Event('load')))
+      },
+    })
+    HTMLCanvasElement.prototype.getContext = vi.fn(() => ({ drawImage: vi.fn() })) as never
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
+      cb(new Blob(['x'], { type: 'image/jpeg' }))
+    }
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/api/upload')) {
+          return { ok: false, status: 413, json: async () => ({}) } as Response
+        }
+        return { ok: true, json: async () => ({ id: 'x' }) } as Response
+      }),
+    )
+
+    render(<ReportForm {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Muskie' },
+    })
+    const file = new File(['x'], 'fish.jpg', { type: 'image/jpeg' })
+    fireEvent.change(screen.getByLabelText(/photos/i), { target: { files: [file] } })
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/could not be uploaded/i)).toBeInTheDocument(),
+    )
+    expect(mockEnqueueCreate).not.toHaveBeenCalled()
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+  })
+
+  it('enqueueCreate returning outbox_full shows the cap message, does not call onSubmit, and keeps the form open', async () => {
+    mockEnqueueCreate.mockResolvedValue({ ok: false, reason: 'outbox_full' })
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('offline')))
+
+    render(<ReportForm {...defaultProps} />)
+    fireEvent.change(screen.getByPlaceholderText(/largemouth bass/i), {
+      target: { value: 'Sturgeon' },
+    })
+    fireEvent.click(screen.getByRole('button', { name: /save catch/i }))
+
+    await waitFor(() =>
+      expect(screen.getByText(/offline queue is full/i)).toBeInTheDocument(),
+    )
+    expect(mockOnSubmit).not.toHaveBeenCalled()
+    expect(mockOnClose).not.toHaveBeenCalled()
+  })
+
+  it('edits (isEditing: true) still work as before: PATCH is attempted and onSubmit fires with the local-fallback payload on failure', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new Error('offline'))
+    vi.stubGlobal('fetch', fetchMock)
+
+    const report = {
+      id: 'existing-id',
+      date: '2026-01-01',
+      time: '10:00',
+      species: 'Trout',
+      length_cm: 30,
+      weight_kg: 1,
+      count: 1,
+      notes: '',
+      bait: '',
+      reporter: 'Jon',
+      lat: 46.18,
+      lng: -76.01,
+      season: 'Summer' as Season,
+      photo_urls: [],
+    }
+
+    render(<ReportForm {...defaultProps} report={report} editToken="tok-123" />)
+
+    fireEvent.click(screen.getByRole('button', { name: /save changes/i }))
+
+    await waitFor(() => expect(mockOnSubmit).toHaveBeenCalled())
+
+    const patchCall = fetchMock.mock.calls.find(([url]) => String(url).includes('/api/reports'))
+    expect(patchCall).toBeDefined()
+    expect(patchCall![1].method).toBe('PATCH')
+
+    const submitted = mockOnSubmit.mock.calls[0][0]
+    expect(submitted.id).toBe('existing-id')
+    expect(mockEnqueueCreate).not.toHaveBeenCalled()
   })
 
   it('calls onClose when cancel is clicked', () => {

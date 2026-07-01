@@ -7,9 +7,12 @@ import CatchDetail from './components/CatchDetail'
 import ConfirmDialog from './components/ConfirmDialog'
 import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
-import { normalizeReport, type Report } from './lib/reports'
+import { normalizeReport, mergeWithPendingReports, type Report } from './lib/reports'
 import { logger } from './lib/logger'
 import { useOutboxSync } from './hooks/useOutboxSync'
+import { getOutboxEntries } from './lib/outbox'
+import type { OutboxEntry } from './lib/db'
+import PendingBadge from './components/PendingBadge'
 
 // MapLibre is ~1 MB; load it on demand so the rest of the page paints first.
 const LacEdjaMap = lazy(() => import('./components/LacEdjaMap'))
@@ -45,30 +48,51 @@ export default function App() {
   const [terrain3d, setTerrain3d] = useState(false) // 3D terrain off by default
   // edit_tokens for catches created on this device (only these can edit/delete).
   const [tokens, setTokens] = useState<Record<string, string>>(() => readTokens())
+  const [outboxEntries, setOutboxEntries] = useState<OutboxEntry[]>([])
 
   // Fallback outbox flush triggers (online / visibility / interval), in
   // addition to Background Sync registered elsewhere.
   useOutboxSync()
 
-  // Load existing catches from the API on first mount.
-  useEffect(() => {
-    let cancelled = false
-    ;(async () => {
-      try {
-        const res = await fetch('/api/reports')
-        if (!res.ok) throw new Error(`HTTP ${res.status}`)
-        const rows = await res.json()
-        if (cancelled || !Array.isArray(rows)) return
-        setReports(rows.map(normalizeReport))
-        logger.info('Reports loaded', { count: rows.length })
-      } catch (err) {
-        logger.warn('Could not load reports from API', { error: String(err) })
-      }
-    })()
-    return () => {
-      cancelled = true
+  const loadReports = useCallback(async () => {
+    try {
+      const res = await fetch('/api/reports')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const rows = await res.json()
+      if (!Array.isArray(rows)) return
+      const fetched = rows.map(normalizeReport)
+      // Merge rather than replace: a background flush may have just synced a
+      // catch that was rendered as "pending" a moment ago, so we want the
+      // now-confirmed row to take its place, while not clobbering anything
+      // else already in local state.
+      setReports((prev) => {
+        const fetchedIds = new Set(fetched.map((r) => r.id))
+        const keepLocal = prev.filter((r) => !fetchedIds.has(r.id))
+        return [...fetched, ...keepLocal]
+      })
+      logger.info('Reports loaded', { count: rows.length })
+    } catch (err) {
+      logger.warn('Could not load reports from API', { error: String(err) })
     }
   }, [])
+
+  // Load existing catches from the API on first mount, and poll the outbox
+  // for `create`-type entries so unsynced catches can be rendered
+  // optimistically with a "Pending sync" badge. Re-polls whenever the flush
+  // engine mutates the outbox (see src/lib/sync.ts's `notifyOutboxChanged`),
+  // and also re-fetches /api/reports on that same signal: once a flush
+  // succeeds the outbox entry disappears, and without a re-fetch here the
+  // now-synced catch would just vanish from the grid until the next full
+  // page load instead of reappearing as a normal (non-pending) card.
+  useEffect(() => {
+    const refresh = () => {
+      void getOutboxEntries().then(setOutboxEntries)
+      void loadReports()
+    }
+    refresh()
+    window.addEventListener('outbox:changed', refresh)
+    return () => window.removeEventListener('outbox:changed', refresh)
+  }, [loadReports])
 
   useEffect(() => {
     if (!toast) return
@@ -76,9 +100,14 @@ export default function App() {
     return () => clearTimeout(t)
   }, [toast])
 
+  const reportsWithPending = useMemo(
+    () => mergeWithPendingReports(reports, outboxEntries),
+    [reports, outboxEntries],
+  )
+
   const filteredReports = useMemo(
-    () => reports.filter((r) => r.season === season),
-    [reports, season],
+    () => reportsWithPending.filter((r) => r.season === season),
+    [reportsWithPending, season],
   )
 
   const markers = useMemo(
@@ -109,9 +138,9 @@ export default function App() {
 
   const handleMarkerClick = useCallback(
     (id: string) => {
-      setDetail(reports.find((r) => r.id === id) ?? null)
+      setDetail(reportsWithPending.find((r) => r.id === id) ?? null)
     },
-    [reports],
+    [reportsWithPending],
   )
 
   const handleAddCatch = () => {
@@ -380,11 +409,14 @@ export default function App() {
                           </span>
                         ) : null}
                       </div>
-                      {canManage && (
-                        <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700 dark:text-reed-400">
-                          Yours
-                        </span>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {canManage && (
+                          <span className="rounded-full bg-reed-500/10 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-reed-700 dark:text-reed-400">
+                            Yours
+                          </span>
+                        )}
+                        {report.pending && <PendingBadge />}
+                      </div>
                     </div>
                   </article>
                 )
