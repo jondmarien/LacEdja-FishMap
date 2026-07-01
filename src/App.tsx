@@ -7,6 +7,7 @@ import CatchDetail from './components/CatchDetail'
 import ConfirmDialog from './components/ConfirmDialog'
 import ThemeToggle from './components/ThemeToggle'
 import Logo from './components/Logo'
+import DownloadOfflineButton from './components/DownloadOfflineButton'
 import {
   normalizeReport,
   mergeWithPendingReports,
@@ -354,6 +355,7 @@ export default function App() {
                 3D
               </button>
               <SeasonSelector value={season} onChange={setSeason} />
+              <DownloadOfflineButton />
             </div>
           </div>
 
