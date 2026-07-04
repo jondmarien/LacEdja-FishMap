@@ -24,7 +24,13 @@ registerRoute(
   /^https:\/\/server\.arcgisonline\.com\/.*/,
   new CacheFirst({
     cacheName: 'basemap-tiles',
-    plugins: [new ExpirationPlugin({ maxEntries: 500, maxAgeSeconds: 60 * 60 * 24 * 30 })],
+    plugins: [
+      new ExpirationPlugin({
+        maxEntries: 1200,
+        maxAgeSeconds: 60 * 60 * 24 * 90,
+        purgeOnQuotaError: true,
+      }),
+    ],
   }),
 )
 

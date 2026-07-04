@@ -198,10 +198,43 @@ export function getTileUrls(): string[] {
 const CACHE_NAME = 'basemap-tiles'
 const PREFETCH_CONCURRENCY = 6
 
+/** Fraction of expected lake tiles that counts as "ready offline". */
+const CACHE_COMPLETE_RATIO = 0.95
+
 export interface PrefetchSummary {
   succeeded: number
   skipped: number
   failed: number
+  alreadyCached: number
+}
+
+export interface LakeTileCacheStatus {
+  cached: number
+  total: number
+  complete: boolean
+}
+
+/**
+ * How many of the lake's expected basemap tiles are already in Cache Storage.
+ * Used to show "Lake ready offline" vs prompting a full re-download.
+ */
+export async function getLakeTileCacheStatus(): Promise<LakeTileCacheStatus> {
+  const total = getTileCount()
+  if (typeof caches === 'undefined') {
+    return { cached: 0, total, complete: false }
+  }
+
+  const expected = new Set(getTileUrls())
+  const cache = await caches.open(CACHE_NAME)
+  const keys = await cache.keys()
+
+  let cached = 0
+  for (const request of keys) {
+    if (expected.has(request.url)) cached += 1
+  }
+
+  const complete = cached >= Math.floor(total * CACHE_COMPLETE_RATIO)
+  return { cached, total, complete }
 }
 
 /**
@@ -245,22 +278,27 @@ export async function prefetchLakeTiles(
   const urls = getTileUrls()
   const total = urls.length
   let done = 0
-  const summary: PrefetchSummary = { succeeded: 0, skipped: 0, failed: 0 }
+  const summary: PrefetchSummary = { succeeded: 0, skipped: 0, failed: 0, alreadyCached: 0 }
 
   const cache = await caches.open(CACHE_NAME)
 
   await runWithConcurrency(urls, PREFETCH_CONCURRENCY, async (url) => {
     try {
-      const res = await fetch(url)
-      if (!res.ok) {
-        // Tolerate 404s (and other non-OK statuses) for individual tiles —
-        // skip, don't throw, don't abort the batch.
-        summary.skipped += 1
+      const existing = await cache.match(url)
+      if (existing) {
+        summary.alreadyCached += 1
       } else {
-        // res.ok/res.status don't consume the body; cache.put() takes the
-        // whole (unconsumed) Response directly, so no clone is needed here.
-        await cache.put(url, res)
-        summary.succeeded += 1
+        const res = await fetch(url)
+        if (!res.ok) {
+          // Tolerate 404s (and other non-OK statuses) for individual tiles —
+          // skip, don't throw, don't abort the batch.
+          summary.skipped += 1
+        } else {
+          // res.ok/res.status don't consume the body; cache.put() takes the
+          // whole (unconsumed) Response directly, so no clone is needed here.
+          await cache.put(url, res)
+          summary.succeeded += 1
+        }
       }
     } catch {
       // A genuine failure (e.g. network error mid-batch, such as the device

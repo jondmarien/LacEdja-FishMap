@@ -6,6 +6,7 @@ import {
   ZOOM_LEVELS,
   LAKE_BOUNDS,
   prefetchLakeTiles,
+  getLakeTileCacheStatus,
 } from './tilePrefetch'
 
 const URL_PATTERN =
@@ -89,12 +90,14 @@ describe('prefetchLakeTiles', () => {
     vi.unstubAllGlobals()
   })
 
-  function stubCaches() {
+  function stubCaches(matchResult: Response | undefined = undefined) {
     const put = vi.fn().mockResolvedValue(undefined)
-    const mockCache = { put }
+    const match = vi.fn().mockResolvedValue(matchResult)
+    const keys = vi.fn().mockResolvedValue([])
+    const mockCache = { put, match, keys }
     const open = vi.fn().mockResolvedValue(mockCache)
     vi.stubGlobal('caches', { open })
-    return { open, put }
+    return { open, put, match, keys, mockCache }
   }
 
   it('reports progress incrementally up to total', async () => {
@@ -115,7 +118,7 @@ describe('prefetchLakeTiles', () => {
     const doneValues = progressCalls.map((c) => c.done).sort((a, b) => a - b)
     expect(doneValues).toEqual(Array.from({ length: total }, (_, i) => i + 1))
     expect(progressCalls.every((c) => c.total === total)).toBe(true)
-    expect(summary).toEqual({ succeeded: total, skipped: 0, failed: 0 })
+    expect(summary).toEqual({ succeeded: total, skipped: 0, failed: 0, alreadyCached: 0 })
   })
 
   it('skips 404 responses without throwing or aborting remaining tiles', async () => {
@@ -173,14 +176,33 @@ describe('prefetchLakeTiles', () => {
   // duplicated/skipped indices from the pool's cursor logic) plus the
   // succeeded/skipped/failed tally above, and note this tradeoff rather than
   // building a full concurrency-timing harness.
-  it('calls fetch exactly once per tile (no duplication or omission from the pool)', async () => {
-    stubCaches()
+  it('skips fetch for tiles already in cache', async () => {
+    const { put, match } = stubCaches()
     const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200 } as Response)
     vi.stubGlobal('fetch', fetchMock)
+    match.mockImplementation((url: string) =>
+      url.includes('/12/') ? Promise.resolve({} as Response) : Promise.resolve(undefined),
+    )
 
-    const total = getTileCount()
-    await prefetchLakeTiles()
+    const summary = await prefetchLakeTiles()
 
-    expect(fetchMock).toHaveBeenCalledTimes(total)
+    expect(summary.alreadyCached).toBeGreaterThan(0)
+    expect(fetchMock.mock.calls.length).toBeLessThan(getTileCount())
+    expect(put.mock.calls.length).toBeLessThan(getTileCount())
+  })
+
+  it('getLakeTileCacheStatus counts only expected lake tile URLs', async () => {
+    const urls = getTileUrls()
+    const { keys } = stubCaches()
+    keys.mockResolvedValue([
+      new Request(urls[0]),
+      new Request(urls[1]),
+      new Request('https://server.arcgisonline.com/other/tile/1/2/3'),
+    ])
+
+    const status = await getLakeTileCacheStatus()
+    expect(status.cached).toBe(2)
+    expect(status.total).toBe(getTileCount())
+    expect(status.complete).toBe(false)
   })
 })
