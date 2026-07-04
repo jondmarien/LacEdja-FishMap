@@ -13,6 +13,10 @@ export default defineConfig({
       filename: 'sw.ts',
       registerType: 'autoUpdate',
       injectRegister: false, // we call registerSW() ourselves in main.tsx
+      devOptions: {
+        enabled: true,
+        type: 'module',
+      },
       includeAssets: ['favicon.svg'],
       manifest: {
         name: 'Lac Edja Fish Map',
