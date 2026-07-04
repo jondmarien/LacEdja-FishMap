@@ -1,20 +1,25 @@
-import { precacheAndRoute } from 'workbox-precaching'
-import { registerRoute } from 'workbox-routing'
+import { clientsClaim, skipWaiting } from 'workbox-core'
+import { createHandlerBoundToURL, precacheAndRoute } from 'workbox-precaching'
+import { NavigationRoute, registerRoute } from 'workbox-routing'
 import { CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
 
 declare let self: ServiceWorkerGlobalScope
 
+skipWaiting()
+clientsClaim()
+
 precacheAndRoute(self.__WB_MANIFEST)
 
-// No NavigationRoute / navigateFallback is registered here, intentionally.
-// Commit f4c2515 fixed a bug where the SW's SPA-shell navigation fallback
-// hijacked /api/photo (and other /api/*) navigations, serving index.html
-// instead of letting the request hit the network. This sw.ts currently has
-// no navigateFallback at all, so that bug can't recur today — but if SPA
-// offline-shell support (a navigateFallback / NavigationRoute) is added
-// later, it MUST exclude /api/* (e.g. via a denylist predicate) or the
-// /api/photo regression comes back.
+// Serve the SPA shell for navigations while offline. Denylist /api/* so
+// opening a catch photo in a new tab (/api/photo?pathname=...) still hits
+// the network/function instead of index.html (regression fixed in f4c2515).
+registerRoute(
+  new NavigationRoute(createHandlerBoundToURL('/index.html'), {
+    denylist: [/^\/api\//],
+  }),
+)
+
 registerRoute(
   /^https:\/\/server\.arcgisonline\.com\/.*/,
   new CacheFirst({
