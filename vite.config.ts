@@ -16,6 +16,7 @@ export default defineConfig({
       devOptions: {
         enabled: true,
         type: 'module',
+        navigateFallback: 'index.html',
       },
       includeAssets: ['favicon.svg'],
       manifest: {
@@ -25,6 +26,9 @@ export default defineConfig({
         theme_color: '#0c4a6e',
         background_color: '#eef6f8',
         display: 'standalone',
+        start_url: '/',
+        scope: '/',
+        id: '/',
         icons: [
           {
             src: '/favicon.svg',
