@@ -19,6 +19,7 @@ type Status = 'idle' | 'running' | 'done'
 export default function DownloadOfflineButton() {
   const [status, setStatus] = useState<Status>('idle')
   const [cacheStatus, setCacheStatus] = useState<LakeTileCacheStatus | null>(null)
+  const [showRefreshConfirm, setShowRefreshConfirm] = useState(false)
   const [progress, setProgress] = useState({ done: 0, total: getTileCount() })
   const [summary, setSummary] = useState<PrefetchSummary | null>(null)
 
@@ -30,8 +31,7 @@ export default function DownloadOfflineButton() {
     refreshCacheStatus()
   }, [refreshCacheStatus])
 
-  const handleClick = useCallback(() => {
-    if (status === 'running') return
+  const startDownload = useCallback(() => {
     setStatus('running')
     setSummary(null)
     setProgress({ done: 0, total: getTileCount() })
@@ -44,10 +44,53 @@ export default function DownloadOfflineButton() {
         setStatus('done')
         refreshCacheStatus()
       })
-  }, [status, refreshCacheStatus])
+  }, [refreshCacheStatus])
+
+  const needsRefreshConfirm =
+    status === 'done' || (status === 'idle' && cacheStatus?.complete === true)
+
+  const handleClick = useCallback(() => {
+    if (status === 'running') return
+    if (needsRefreshConfirm) {
+      setShowRefreshConfirm(true)
+      return
+    }
+    startDownload()
+  }, [status, needsRefreshConfirm, startDownload])
+
+  const handleConfirmRefresh = useCallback(() => {
+    setShowRefreshConfirm(false)
+    startDownload()
+  }, [startDownload])
 
   if (typeof caches === 'undefined') {
     return null
+  }
+
+  if (showRefreshConfirm) {
+    return (
+      <div
+        role="group"
+        aria-label="Confirm offline tile refresh"
+        className="inline-flex flex-wrap items-center gap-1.5"
+      >
+        <span className="text-sm text-slate-600 dark:text-slate-300">Refresh offline tiles?</span>
+        <button
+          type="button"
+          onClick={handleConfirmRefresh}
+          className="rounded-full border border-lake-600 bg-lake-600 px-2.5 py-1 text-sm font-medium text-white transition-colors hover:bg-lake-700"
+        >
+          Yes
+        </button>
+        <button
+          type="button"
+          onClick={() => setShowRefreshConfirm(false)}
+          className="rounded-full border border-lake-100 bg-white px-2.5 py-1 text-sm font-medium text-slate-500 transition-colors hover:bg-lake-50 dark:border-white/10 dark:bg-lake-900/60 dark:text-slate-400 dark:hover:bg-white/10"
+        >
+          Cancel
+        </button>
+      </div>
+    )
   }
 
   if (status === 'running') {

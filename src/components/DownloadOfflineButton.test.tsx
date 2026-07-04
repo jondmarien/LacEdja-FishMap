@@ -96,4 +96,32 @@ describe('DownloadOfflineButton', () => {
       expect(screen.getByText(/downloaded \(2 tiles unavailable\)/i)).toBeInTheDocument(),
     )
   })
+
+  it('asks for confirmation before re-downloading when lake is ready offline', async () => {
+    vi.stubGlobal('caches', {})
+    mockCacheStatus.mockResolvedValue({ cached: 10, total: 10, complete: true })
+    render(<DownloadOfflineButton />)
+
+    await waitFor(() => expect(screen.getByText(/lake ready offline/i)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/lake ready offline/i))
+
+    expect(screen.getByText(/refresh offline tiles\?/i)).toBeInTheDocument()
+    expect(mockPrefetch).not.toHaveBeenCalled()
+
+    fireEvent.click(screen.getByRole('button', { name: /^yes$/i }))
+    await waitFor(() => expect(mockPrefetch).toHaveBeenCalledTimes(1))
+  })
+
+  it('cancels refresh confirmation without starting a download', async () => {
+    vi.stubGlobal('caches', {})
+    mockCacheStatus.mockResolvedValue({ cached: 10, total: 10, complete: true })
+    render(<DownloadOfflineButton />)
+
+    await waitFor(() => expect(screen.getByText(/lake ready offline/i)).toBeInTheDocument())
+    fireEvent.click(screen.getByText(/lake ready offline/i))
+    fireEvent.click(screen.getByRole('button', { name: /^cancel$/i }))
+
+    expect(mockPrefetch).not.toHaveBeenCalled()
+    await waitFor(() => expect(screen.getByText(/lake ready offline/i)).toBeInTheDocument())
+  })
 })
