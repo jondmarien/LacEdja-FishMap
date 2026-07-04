@@ -8,6 +8,10 @@ vi.mock('../lib/tilePrefetch', () => ({
   prefetchLakeTiles: vi.fn(),
 }))
 
+vi.mock('../lib/storage', () => ({
+  requestPersistentStorage: vi.fn().mockResolvedValue(true),
+}))
+
 import { getLakeTileCacheStatus, prefetchLakeTiles } from '../lib/tilePrefetch'
 
 const mockCacheStatus = getLakeTileCacheStatus as unknown as ReturnType<typeof vi.fn>
@@ -16,7 +20,8 @@ const mockPrefetch = prefetchLakeTiles as unknown as ReturnType<typeof vi.fn>
 describe('DownloadOfflineButton', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
-    vi.clearAllMocks()
+    mockCacheStatus.mockClear()
+    mockPrefetch.mockClear()
   })
 
   it('renders idle state when no tiles are cached', async () => {
@@ -69,7 +74,7 @@ describe('DownloadOfflineButton', () => {
     )
     fireEvent.click(screen.getByText(/download lake for offline/i))
 
-    expect(mockPrefetch).toHaveBeenCalledTimes(1)
+    await waitFor(() => expect(mockPrefetch).toHaveBeenCalledTimes(1))
     await waitFor(() => expect(screen.getByText(/downloading…\s*1\/10/i)).toBeInTheDocument())
 
     resolveFn({ succeeded: 10, skipped: 0, failed: 0, alreadyCached: 0 })

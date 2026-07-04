@@ -7,6 +7,7 @@ import {
   type PrefetchSummary,
   type LakeTileCacheStatus,
 } from '../lib/tilePrefetch'
+import { requestPersistentStorage } from '../lib/storage'
 
 type Status = 'idle' | 'running' | 'done'
 
@@ -34,11 +35,15 @@ export default function DownloadOfflineButton() {
     setStatus('running')
     setSummary(null)
     setProgress({ done: 0, total: getTileCount() })
-    void prefetchLakeTiles((done, total) => setProgress({ done, total })).then((result) => {
-      setSummary(result)
-      setStatus('done')
-      refreshCacheStatus()
-    })
+    void requestPersistentStorage()
+      .then(() =>
+        prefetchLakeTiles((done, total) => setProgress({ done, total })),
+      )
+      .then((result) => {
+        setSummary(result)
+        setStatus('done')
+        refreshCacheStatus()
+      })
   }, [status, refreshCacheStatus])
 
   if (typeof caches === 'undefined') {
