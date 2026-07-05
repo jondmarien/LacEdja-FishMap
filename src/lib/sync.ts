@@ -22,7 +22,20 @@ const MAX_ATTEMPTS = 5
 let isFlushing = false
 
 function notifyOutboxChanged() {
-  window.dispatchEvent(new CustomEvent('outbox:changed'))
+  // Page context: dispatch the DOM event the UI (useOutboxSync) listens for.
+  if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function') {
+    window.dispatchEvent(new CustomEvent('outbox:changed'))
+    return
+  }
+  // Service worker context (Background Sync flush): there is no `window`, so
+  // notify any open page clients via postMessage instead. Harmless no-op if
+  // there are no open clients.
+  const swClients = (self as unknown as { clients?: { matchAll?: (opts?: unknown) => Promise<Array<{ postMessage: (msg: unknown) => void }>> } }).clients
+  if (swClients?.matchAll) {
+    void swClients.matchAll({ type: 'window' }).then((clients) => {
+      for (const client of clients) client.postMessage({ type: 'outbox:changed' })
+    })
+  }
 }
 
 /**

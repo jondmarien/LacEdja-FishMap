@@ -8,6 +8,7 @@ import {
 import { NavigationRoute, registerRoute, setCatchHandler } from 'workbox-routing'
 import { CacheFirst } from 'workbox-strategies'
 import { ExpirationPlugin } from 'workbox-expiration'
+import { flushOutbox } from './lib/sync'
 
 declare let self: ServiceWorkerGlobalScope
 
@@ -57,6 +58,6 @@ registerRoute(
 
 self.addEventListener('sync', (event: any) => {
   if (event.tag === 'flush-outbox') {
-    event.waitUntil(import('./lib/sync').then((m) => m.flushOutbox()))
+    event.waitUntil(flushOutbox())
   }
 })
