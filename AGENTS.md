@@ -105,5 +105,36 @@ confirm the second call returns the existing row (200) not a duplicate (a
 `SELECT COUNT(*) FROM reports WHERE id = ...` afterward confirms only one row
 exists).
 
+## Cursor Cloud specific instructions
+
+Durable, non-obvious notes for future cloud agents (the update script already
+installs Bun and runs `bun install`, so those steps are not repeated here).
+
+- **Package manager is Bun**, installed at `~/.bun/bin` and on `PATH` via
+  `~/.bashrc`. Standard scripts live in `package.json`: `bun dev` (Vite on
+  `http://localhost:5173`), `bun run lint` (oxlint), `bun run test:run`
+  (vitest, non-watch), `bun run test` (vitest watch), `bun run build`
+  (`tsc -b && vite build` + PWA service worker).
+- **`bun dev` only serves the frontend.** The `/api/*` routes are Vercel
+  serverless functions (Web-standard `GET/POST/PATCH/DELETE(request: Request)`
+  exports in `api/`); Vite does NOT serve them. For a real full-stack local
+  loop you need either `vercel dev` (requires interactive Vercel login, not
+  available headless) or a small throwaway harness that imports the `api/*`
+  handlers and dispatches by method (Bun runs the `.ts` handlers directly and
+  auto-loads `.env`), fronted by a temporary Vite `server.proxy` of `/api` to
+  it. Without a backend, the UI degrades gracefully: submitting a catch queues
+  into the IndexedDB outbox with a "Pending sync" badge (offline-first is by
+  design).
+- **Live credentials are committed in `.env`** (`POSTGRES_URL` → a shared Neon
+  Postgres, `BLOB_READ_WRITE_TOKEN` → Vercel Blob). The `reports` table is
+  already migrated (see `db/migrations/`). This is the family's real database,
+  so DELETE any test rows you insert when done; do not leave demo catches
+  behind.
+- **The map is MapLibre GL (WebGL) with ArcGIS World Imagery tiles.** Tile
+  URLs are reachable from the VM, but in a headless/sandbox browser the map
+  canvas can render as a dark rectangle (WebGL limitation). This does not block
+  the core flow: the "Log a catch" button opens the report form independently
+  of the map.
+
 ## Contact / Ownership
 Maintained by Jon Marien (chrono). Family use only for v1.
